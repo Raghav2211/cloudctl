@@ -1,4 +1,4 @@
-package cli
+package services
 
 import (
 	"cloudctl/provider/aws/cli/globals"
@@ -13,7 +13,7 @@ type describeInstanceCmd struct {
 	Id string `name:"name" arg:"required"`
 }
 
-type eC2Command struct {
+type EC2Command struct {
 	List             eC2ListCmd          `name:"ls" cmd:"" help:"ec2 lists"`
 	DescribeInstance describeInstanceCmd `name:"desc" cmd:"" help:"Avaiable region list"`
 }

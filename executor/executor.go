@@ -1,6 +1,8 @@
-package services
+package executor
 
 import (
+	"cloudctl/fetcher"
+	"cloudctl/viewer"
 	"fmt"
 	"time"
 
@@ -8,8 +10,8 @@ import (
 )
 
 type CommandExecutor struct {
-	Fetcher Fetcher
-	Viewer  ViewerFunc
+	Fetcher fetcher.Fetcher
+	Viewer  viewer.ViewerFunc
 }
 
 func (exe *CommandExecutor) Execute() error {

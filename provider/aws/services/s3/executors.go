@@ -1,10 +1,11 @@
 package s3
 
 import (
+	"cloudctl/executor"
 	"cloudctl/provider/aws"
 	"cloudctl/provider/aws/cli/globals"
-	"cloudctl/provider/aws/services"
-	itime "cloudctl/time"
+
+	ctltime "cloudctl/time"
 	"fmt"
 	"time"
 
@@ -17,8 +18,8 @@ const (
 	DATE_PASER = "2006-01-02 15:04:05"
 )
 
-func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string) *services.CommandExecutor {
-	tz := itime.GetTZ(flag.TZShortIdentifier)
+func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string) *executor.CommandExecutor {
+	tz := ctltime.GetTZ(flag.TZShortIdentifier)
 	dFrom := new(time.Time)
 	dTo := new(time.Time)
 	if len(from) != 0 {
@@ -47,7 +48,7 @@ func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string)
 		// TODO handle error
 		panic(err)
 	}
-	return &services.CommandExecutor{
+	return &executor.CommandExecutor{
 		Fetcher: &bucketListFetcher{
 			client: clients[0].(*s3.S3),
 			filter: &bucketListFilter{
@@ -60,30 +61,30 @@ func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string)
 	}
 }
 
-func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName, bucketPrefix string) *services.CommandExecutor {
+func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName, bucketPrefix string) *executor.CommandExecutor {
 	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient)
 	if err != nil {
 		// TODO handle error
 		panic(err)
 	}
-	return &services.CommandExecutor{
+	return &executor.CommandExecutor{
 		Fetcher: &bucketObjectsFetcher{
 			client:       clients[0].(*s3.S3),
 			bucketName:   bucketName,
 			objectPrefix: bucketPrefix,
-			tz:           itime.GetTZ(flag.TZShortIdentifier),
+			tz:           ctltime.GetTZ(flag.TZShortIdentifier),
 		},
 		Viewer: bucketObjectsViewer,
 	}
 }
 
-func NewBucketViewCommandExecutor(flag *globals.CLIFlag, bucketName string) *services.CommandExecutor {
+func NewBucketViewCommandExecutor(flag *globals.CLIFlag, bucketName string) *executor.CommandExecutor {
 	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient)
 	if err != nil {
 		// TODO handle error
 		panic(err)
 	}
-	return &services.CommandExecutor{
+	return &executor.CommandExecutor{
 		Fetcher: &bucketConfigurationFetcher{
 			client:     clients[0].(*s3.S3),
 			bucketName: bucketName,
@@ -92,7 +93,7 @@ func NewBucketViewCommandExecutor(flag *globals.CLIFlag, bucketName string) *ser
 	}
 }
 
-func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, key, path string, recursive bool) *services.CommandExecutor {
+func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, key, path string, recursive bool) *executor.CommandExecutor {
 
 	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient, newS3Downloader)
 	if err != nil {
@@ -100,7 +101,7 @@ func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, k
 		panic("error occur during create client")
 	}
 
-	return &services.CommandExecutor{
+	return &executor.CommandExecutor{
 		Fetcher: &bucketObjectsDownloadFetcher{
 			client:     clients[0].(*s3.S3),
 			downloader: clients[1].(*s3manager.Downloader),

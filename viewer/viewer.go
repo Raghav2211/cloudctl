@@ -1,5 +1,7 @@
 package viewer
 
+type ViewerFunc func(o interface{}) Viewer
+
 type Viewer interface {
 	View()
 }

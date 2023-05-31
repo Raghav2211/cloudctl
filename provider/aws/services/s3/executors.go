@@ -8,10 +8,6 @@ import (
 	ctltime "cloudctl/time"
 	"fmt"
 	"time"
-
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
 const (
@@ -43,14 +39,11 @@ func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string)
 		panic(fmt.Sprintf("from can't be after to if both provide | from=%s , to=%s", from, to))
 	}
 
-	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient)
-	if err != nil {
-		// TODO handle error
-		panic(err)
-	}
+	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
+
 	return &executor.CommandExecutor{
 		Fetcher: &bucketListFetcher{
-			client: clients[0].(*s3.S3),
+			client: client,
 			filter: &bucketListFilter{
 				creationDateFrom: dFrom,
 				creationDateTo:   dTo,
@@ -62,14 +55,11 @@ func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string)
 }
 
 func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName, bucketPrefix string) *executor.CommandExecutor {
-	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient)
-	if err != nil {
-		// TODO handle error
-		panic(err)
-	}
+	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
+
 	return &executor.CommandExecutor{
 		Fetcher: &bucketObjectsFetcher{
-			client:       clients[0].(*s3.S3),
+			client:       client,
 			bucketName:   bucketName,
 			objectPrefix: bucketPrefix,
 			tz:           ctltime.GetTZ(flag.TZShortIdentifier),
@@ -79,14 +69,11 @@ func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName, bucke
 }
 
 func NewBucketViewCommandExecutor(flag *globals.CLIFlag, bucketName string) *executor.CommandExecutor {
-	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient)
-	if err != nil {
-		// TODO handle error
-		panic(err)
-	}
+	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
+
 	return &executor.CommandExecutor{
 		Fetcher: &bucketConfigurationFetcher{
-			client:     clients[0].(*s3.S3),
+			client:     client,
 			bucketName: bucketName,
 		},
 		Viewer: bucketConfigurationViewer,
@@ -95,16 +82,11 @@ func NewBucketViewCommandExecutor(flag *globals.CLIFlag, bucketName string) *exe
 
 func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, key, path string, recursive bool) *executor.CommandExecutor {
 
-	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient, newS3Downloader)
-	if err != nil {
-		// TODO : handle error
-		panic("error occur during create client")
-	}
+	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
 
 	return &executor.CommandExecutor{
 		Fetcher: &bucketObjectsDownloadFetcher{
-			client:     clients[0].(*s3.S3),
-			downloader: clients[1].(*s3manager.Downloader),
+			client:     client,
 			bucketName: bucketName,
 			key:        key,
 			path:       path,
@@ -112,30 +94,4 @@ func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, k
 		},
 		Viewer: bucketObjectsDownloadSummaryViewer,
 	}
-}
-
-func newClients(profile, region string, debug bool, funcs ...func(session *session.Session) interface{}) ([]interface{}, error) {
-	session, err := aws.NewSession(
-		profile,
-		region,
-		debug,
-	)
-	if err != nil {
-		return nil, err
-	}
-	var clients []interface{}
-	for _, f := range funcs {
-		clients = append(clients, f(session))
-	}
-	return clients, nil
-}
-
-func newClient(session *session.Session) interface{} {
-	client := s3.New(session)
-	return client
-}
-
-func newS3Downloader(session *session.Session) interface{} {
-	client := s3manager.NewDownloader(session)
-	return client
 }

@@ -1,6 +1,7 @@
 package ec2
 
 import (
+	"cloudctl/provider/aws"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,17 +12,17 @@ import (
 const notApplicable string = "N/A"
 
 type instanceListFetcher struct {
-	client *ec2.EC2
+	client *aws.Client
 }
 
 type instanceInfoFetcher struct {
-	client *ec2.EC2
+	client *aws.Client
 	id     *string
 }
 
 func (f instanceListFetcher) Fetch() (interface{}, error) {
 
-	result, err := f.client.DescribeInstances(nil)
+	result, err := f.client.EC2.DescribeInstances(nil)
 	// TODO : handle next token scenario
 	//fmt.Println("nextToken  -- ", result.NextToken)
 
@@ -58,7 +59,7 @@ func (f instanceInfoFetcher) Fetch() (instanceDetailView interface{}, err error)
 	return
 }
 
-func fetchInstanceDetail(instanceId *string, client *ec2.EC2) (*instanceDetailView, error) {
+func fetchInstanceDetail(instanceId *string, client *aws.Client) (*instanceDetailView, error) {
 	// doneCh := make(chan struct{})
 	volumeOutputChan := make(chan []*instanceVolume)
 	sgOutputChan := make(chan *instanceSGSummary)
@@ -117,7 +118,7 @@ func fetchInstanceDetail(instanceId *string, client *ec2.EC2) (*instanceDetailVi
 		}()
 		go func() {
 			defer close(eniOutputChan)
-			fetchNetworkSummary(eniOutputChan, instance.NetworkInterfaces, client)
+			fetchNetworkSummary(eniOutputChan, instance.NetworkInterfaces)
 		}()
 	}
 	// fmt.Println("eniOutputChan  ==> ", <-eniOutputChan)
@@ -129,11 +130,11 @@ func fetchInstanceDetail(instanceId *string, client *ec2.EC2) (*instanceDetailVi
 		ntwrkSummary: <-eniOutputChan,
 	}, nil
 }
-func getInstacneDetail(instanceId *string, client *ec2.EC2) chan []*ec2.Reservation {
+func getInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Reservation {
 	instancesChan := make(chan []*ec2.Reservation)
 	go func() {
 		defer close(instancesChan)
-		data, err := client.DescribeInstances(&ec2.DescribeInstancesInput{InstanceIds: []*string{instanceId}})
+		data, err := client.EC2.DescribeInstances(&ec2.DescribeInstancesInput{InstanceIds: []*string{instanceId}})
 		if err != nil {
 			// TODO : handle error
 			fmt.Println("error occurred in getInstacneDetail", err.Error())
@@ -143,13 +144,13 @@ func getInstacneDetail(instanceId *string, client *ec2.EC2) chan []*ec2.Reservat
 	return instancesChan
 }
 
-func fetchInstanceVolume(outputchan chan<- []*instanceVolume, volumemappings []*ec2.InstanceBlockDeviceMapping, client *ec2.EC2) {
+func fetchInstanceVolume(outputchan chan<- []*instanceVolume, volumemappings []*ec2.InstanceBlockDeviceMapping, client *aws.Client) {
 	volumeIds := []*string{}
 	op := []*instanceVolume{}
 	for _, b := range volumemappings {
 		volumeIds = append(volumeIds, b.Ebs.VolumeId)
 	}
-	data, err := client.DescribeVolumes(&ec2.DescribeVolumesInput{VolumeIds: volumeIds})
+	data, err := client.EC2.DescribeVolumes(&ec2.DescribeVolumesInput{VolumeIds: volumeIds})
 	if err != nil {
 		fmt.Println("error occurred in getInstanceVolume", err.Error())
 		outputchan <- op
@@ -183,14 +184,14 @@ func fetchInstanceVolume(outputchan chan<- []*instanceVolume, volumemappings []*
 	outputchan <- op
 }
 
-func fetchSecurityGroupsDetail(outputChan chan<- *instanceSGSummary, enis []*ec2.InstanceNetworkInterface, client *ec2.EC2) {
+func fetchSecurityGroupsDetail(outputChan chan<- *instanceSGSummary, enis []*ec2.InstanceNetworkInterface, client *aws.Client) {
 	securityGroupIds := []*string{}
 	for _, eni := range enis {
 		for _, sg := range eni.Groups {
 			securityGroupIds = append(securityGroupIds, sg.GroupId)
 		}
 	}
-	data, err := client.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{GroupIds: securityGroupIds})
+	data, err := client.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{GroupIds: securityGroupIds})
 	if err != nil {
 		fmt.Println("error occured fetchSecurityGroupsDetail ", err)
 	}
@@ -301,7 +302,7 @@ func fetchSecurityGroupsDetail(outputChan chan<- *instanceSGSummary, enis []*ec2
 	outputChan <- instanceSgSummary
 }
 
-func fetchNetworkSummary(outputChan chan<- []*instanceNetworkinterface, enis []*ec2.InstanceNetworkInterface, client *ec2.EC2) {
+func fetchNetworkSummary(outputChan chan<- []*instanceNetworkinterface, enis []*ec2.InstanceNetworkInterface) {
 	networkinterfaces := []*instanceNetworkinterface{}
 	for _, eni := range enis {
 

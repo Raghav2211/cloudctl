@@ -4,15 +4,10 @@ import (
 	"cloudctl/executor"
 	"cloudctl/provider/aws"
 	"cloudctl/provider/aws/cli/globals"
-
-	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
 func NewinstanceListCommandExecutor(flag *globals.CLIFlag) *executor.CommandExecutor {
-	client, err := newClient(flag.Profile, flag.Region, flag.Debug)
-	if err != nil {
-		panic(err)
-	}
+	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
 	return &executor.CommandExecutor{
 		Fetcher: &instanceListFetcher{
 			client: client,
@@ -22,10 +17,8 @@ func NewinstanceListCommandExecutor(flag *globals.CLIFlag) *executor.CommandExec
 }
 
 func NewinstanceDescribeCommandExecutor(flag *globals.CLIFlag, instanceId string) *executor.CommandExecutor {
-	client, err := newClient(flag.Profile, flag.Region, flag.Debug)
-	if err != nil {
-		panic(err)
-	}
+	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
+
 	return &executor.CommandExecutor{
 		Fetcher: &instanceInfoFetcher{
 			client: client,
@@ -33,17 +26,4 @@ func NewinstanceDescribeCommandExecutor(flag *globals.CLIFlag, instanceId string
 		},
 		Viewer: instanceInfoViewer,
 	}
-}
-
-func newClient(profile, region string, debug bool) (client *ec2.EC2, err error) {
-	session, err := aws.NewSession(
-		profile,
-		region,
-		debug,
-	)
-	if err != nil {
-		return nil, err
-	}
-	client = ec2.New(session)
-	return
 }

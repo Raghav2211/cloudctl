@@ -7,6 +7,9 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	"gopkg.in/ini.v1"
 
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -19,7 +22,23 @@ var (
 	env_region  = []string{"AWS_DEFAULT_REGION", "AWS_REGION"}
 )
 
-func NewSession(profile, region string, debug bool) (sess *session.Session, err error) {
+type Client struct {
+	EC2          *ec2.EC2
+	S3           *s3.S3
+	S3Downloader *s3manager.Downloader
+}
+
+func NewClient(profile, region string, debug bool) (client *Client) {
+	session, _ := newSession(profile, region, debug)
+	client = &Client{
+		EC2:          ec2.New(session),
+		S3:           s3.New(session),
+		S3Downloader: s3manager.NewDownloader(session),
+	}
+	return
+}
+
+func newSession(profile, region string, debug bool) (sess *session.Session, err error) {
 
 	defaultConfig := defaults.Get().Config
 
@@ -42,9 +61,8 @@ func NewSession(profile, region string, debug bool) (sess *session.Session, err 
 
 	config := defaultConfig.WithCredentials(cred).WithRegion(r).WithLogLevel(*logLevel)
 
-	sess, err = session.NewSessionWithOptions(session.Options{
-		Config: *config,
-	})
+	session.NewSession(config)
+	sess = session.Must(session.NewSession(config))
 	return
 }
 

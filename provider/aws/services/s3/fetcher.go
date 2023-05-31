@@ -1,6 +1,7 @@
 package s3
 
 import (
+	"cloudctl/provider/aws"
 	itime "cloudctl/time"
 	"fmt"
 	"os"
@@ -11,10 +12,9 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
-var bucketInfoRetrieverFuncs = []func(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sync.WaitGroup){
+var bucketInfoRetrieverFuncs = []func(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup){
 	getBucketPolicy,
 	getBucketVersionConfig,
 	getBucketTags,
@@ -23,13 +23,13 @@ var bucketInfoRetrieverFuncs = []func(bucket *string, client *s3.S3, bucketinfo 
 }
 
 type bucketListFetcher struct {
-	client *s3.S3
+	client *aws.Client
 	filter *bucketListFilter
 	tz     *itime.Timezone
 }
 
 type bucketObjectsFetcher struct {
-	client *s3.S3
+	client *aws.Client
 	// fetch all objects for provided bucket
 	bucketName   string
 	objectPrefix string
@@ -37,13 +37,12 @@ type bucketObjectsFetcher struct {
 }
 
 type bucketConfigurationFetcher struct {
-	client *s3.S3
+	client *aws.Client
 	// fetch configuration for provided bucket
 	bucketName string
 }
 type bucketObjectsDownloadFetcher struct {
-	client     *s3.S3
-	downloader *s3manager.Downloader
+	client     *aws.Client
 	bucketName string
 	key        string
 	path       string
@@ -54,7 +53,7 @@ func (f bucketListFetcher) Fetch() (interface{}, error) {
 
 	// fmt.Println(*f.filter.creationDateFrom, " - ", *f.filter.creationDateTo)
 
-	buckets, err := f.client.ListBuckets(&s3.ListBucketsInput{})
+	buckets, err := f.client.S3.ListBuckets(&s3.ListBucketsInput{})
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +80,7 @@ func (f bucketObjectsFetcher) Fetch() (interface{}, error) {
 	input := &s3.ListObjectsInput{}
 	input.Bucket = &f.bucketName
 	input.Prefix = &f.objectPrefix
-	listBucketObjects, err := f.client.ListObjects(input)
+	listBucketObjects, err := f.client.S3.ListObjects(input)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +121,7 @@ func (f bucketObjectsDownloadFetcher) Fetch() (interface{}, error) {
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &f.bucketName
 		input.Prefix = &f.key
-		listBucketObjects, err := f.client.ListObjects(input)
+		listBucketObjects, err := f.client.S3.ListObjects(input)
 		if err != nil {
 			// TODO : handle error
 			fmt.Println("error occur duing list of objects")
@@ -130,19 +129,19 @@ func (f bucketObjectsDownloadFetcher) Fetch() (interface{}, error) {
 		}
 
 		for _, object := range listBucketObjects.Contents {
-			go downloadObject(f.bucketName, *object.Key, f.path, f.downloader, downloadSummaryChan)
+			go downloadObject(f.bucketName, *object.Key, f.path, f.client, downloadSummaryChan)
 		}
 		for i := 0; i < len(listBucketObjects.Contents); i++ {
 			downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
 		}
 		return downloadSummaries, nil
 	}
-	go downloadObject(f.bucketName, f.key, f.path, f.downloader, downloadSummaryChan)
+	go downloadObject(f.bucketName, f.key, f.path, f.client, downloadSummaryChan)
 	downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
 	return downloadSummaries, nil
 }
 
-func downloadObject(bucketName, key, path string, downloaderClient *s3manager.Downloader, downloadSummaryChan chan<- *bucketObjectsDownloadSummary) {
+func downloadObject(bucketName, key, path string, client *aws.Client, downloadSummaryChan chan<- *bucketObjectsDownloadSummary) {
 	start := time.Now()
 	downloadFileAbsPath := fmt.Sprintf("%s/%s", path, key)
 
@@ -163,7 +162,7 @@ func downloadObject(bucketName, key, path string, downloaderClient *s3manager.Do
 	}
 	defer file.Close()
 
-	numBytesWrite, err := downloaderClient.Download(file, &s3.GetObjectInput{
+	numBytesWrite, err := client.S3Downloader.Download(file, &s3.GetObjectInput{
 		Bucket: &bucketName,
 		Key:    &key,
 	})
@@ -180,9 +179,9 @@ func downloadObject(bucketName, key, path string, downloaderClient *s3manager.Do
 	}
 }
 
-func getBucketPolicy(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketPolicy(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
 	defer wg.Done()
-	res, err := client.GetBucketPolicy(&s3.GetBucketPolicyInput{Bucket: bucket})
+	res, err := client.S3.GetBucketPolicy(&s3.GetBucketPolicyInput{Bucket: bucket})
 	if err != nil {
 		errr, _ := err.(awserr.Error)
 		fmt.Println("errCode", errr.Code(), " message ", errr.Message())
@@ -192,9 +191,9 @@ func getBucketPolicy(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *
 	bucketinfo.SetPolicy(res)
 }
 
-func getBucketVersionConfig(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketVersionConfig(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
 	defer wg.Done()
-	res, err := client.GetBucketVersioning(&s3.GetBucketVersioningInput{Bucket: bucket})
+	res, err := client.S3.GetBucketVersioning(&s3.GetBucketVersioningInput{Bucket: bucket})
 	if err != nil {
 		bucketinfo.SetVersionAPIError(err)
 		return
@@ -202,9 +201,9 @@ func getBucketVersionConfig(bucket *string, client *s3.S3, bucketinfo *bucketInf
 	bucketinfo.SetVersion(res)
 }
 
-func getBucketTags(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketTags(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
 	defer wg.Done()
-	res, err := client.GetBucketTagging(&s3.GetBucketTaggingInput{Bucket: bucket})
+	res, err := client.S3.GetBucketTagging(&s3.GetBucketTaggingInput{Bucket: bucket})
 	if err != nil {
 		bucketinfo.SetTagsAPIError(err)
 		return
@@ -212,9 +211,9 @@ func getBucketTags(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sy
 	bucketinfo.SetTags(res)
 }
 
-func getBucketencryptionConfig(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketencryptionConfig(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
 	defer wg.Done()
-	res, err := client.GetBucketEncryption(&s3.GetBucketEncryptionInput{Bucket: bucket})
+	res, err := client.S3.GetBucketEncryption(&s3.GetBucketEncryptionInput{Bucket: bucket})
 	if err != nil {
 		bucketinfo.SetEncryptionConfigAPIError(err)
 		return
@@ -222,9 +221,9 @@ func getBucketencryptionConfig(bucket *string, client *s3.S3, bucketinfo *bucket
 	bucketinfo.SetEncryptionConfig(res)
 }
 
-func getBucketLifecycleConfig(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketLifecycleConfig(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
 	defer wg.Done()
-	res, err := client.GetBucketLifecycleConfiguration(&s3.GetBucketLifecycleConfigurationInput{Bucket: bucket})
+	res, err := client.S3.GetBucketLifecycleConfiguration(&s3.GetBucketLifecycleConfigurationInput{Bucket: bucket})
 
 	if err != nil {
 		fmt.Println("Error message", err.Error())

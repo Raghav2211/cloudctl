@@ -20,7 +20,7 @@ func main() {
 	}
 	ctx := kong.Parse(&cli,
 		kong.Name("raws"),
-		kong.Description("CLI to read aws resources and provide output in human redable format"),
+		kong.Description("CloudCtl is a GO library that interacts with cloud providers and displays output in a human-readable fashion."),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{
 			Compact: true,

@@ -28,9 +28,9 @@ func NewSession(profile, region string, debug bool) (sess *session.Session, err 
 		logLevel = aws.LogLevel(aws.LogDebugWithRequestRetries | aws.LogDebugWithRequestErrors)
 	}
 
-	// fetch profile from env `see:AWS_PROFILE` if not provide via command
+	// fetch profile from env `see:env_profile` if not provide via command
 	p := getEnv(profile, env_profile)
-	// fetch region from env `see:AWS_REGION` if not provide via command
+	// fetch region from env `see:env_region` if not provide via command
 	r := getEnv(region, env_region)
 
 	if len(r) == 0 {

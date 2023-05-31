@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -114,26 +115,35 @@ func (f bucketConfigurationFetcher) Fetch() (interface{}, error) {
 }
 
 func (f bucketObjectsDownloadFetcher) Fetch() (interface{}, error) {
+	downloadSummaryChan := make(chan *bucketObjectsDownloadSummary)
+	downloadSummaries := []*bucketObjectsDownloadSummary{}
+	defer close(downloadSummaryChan)
 	if f.recursive {
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &f.bucketName
 		input.Prefix = &f.key
 		listBucketObjects, err := f.client.ListObjects(input)
 		if err != nil {
+			// TODO : handle error
+			fmt.Println("error occur duing list of objects")
 			return nil, err
 		}
 
 		for _, object := range listBucketObjects.Contents {
-			downloadObject(f.bucketName, *object.Key, f.path, f.downloader)
+			go downloadObject(f.bucketName, *object.Key, f.path, f.downloader, downloadSummaryChan)
 		}
-		return new(string), nil
+		for i := 0; i < len(listBucketObjects.Contents); i++ {
+			downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
+		}
+		return downloadSummaries, nil
 	}
-	downloadObject(f.bucketName, f.key, f.path, f.downloader)
-
-	return new(string), nil
+	go downloadObject(f.bucketName, f.key, f.path, f.downloader, downloadSummaryChan)
+	downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
+	return downloadSummaries, nil
 }
 
-func downloadObject(bucketName, key, path string, downloaderClient *s3manager.Downloader) error {
+func downloadObject(bucketName, key, path string, downloaderClient *s3manager.Downloader, downloadSummaryChan chan<- *bucketObjectsDownloadSummary) {
+	start := time.Now()
 	downloadFileAbsPath := fmt.Sprintf("%s/%s", path, key)
 
 	fileDir := filepath.Dir(downloadFileAbsPath)
@@ -141,14 +151,15 @@ func downloadObject(bucketName, key, path string, downloaderClient *s3manager.Do
 	if _, err := os.Stat(fileDir); os.IsNotExist(err) {
 		err := os.MkdirAll(fileDir, os.ModePerm)
 		if err != nil {
+			//TODO: handle error
 			fmt.Println("erro occur during create dir ", err)
 		}
 	}
 
 	file, err := os.Create(downloadFileAbsPath)
 	if err != nil {
+		//TODO: handle error
 		fmt.Println("[file] err occur on ", key, err)
-		return err
 	}
 	defer file.Close()
 
@@ -157,12 +168,16 @@ func downloadObject(bucketName, key, path string, downloaderClient *s3manager.Do
 		Key:    &key,
 	})
 	if err != nil {
+		//TODO: handle error
 		fmt.Println("[numBytesWrite] err occur on ", key)
-		return err
 	}
-	fmt.Println("downloaded ", key, " ==> ", file.Name(), numBytesWrite, "bytes")
 
-	return nil
+	downloadSummaryChan <- &bucketObjectsDownloadSummary{
+		source:      key,
+		destination: file.Name(),
+		sizeinBytes: numBytesWrite,
+		timeElapsed: time.Since(start),
+	}
 }
 
 func getBucketPolicy(bucket *string, client *s3.S3, bucketinfo *bucketInfo, wg *sync.WaitGroup) {

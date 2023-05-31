@@ -16,6 +16,12 @@ var (
 		"StorageClass",
 		"LastModified",
 	}
+	bucketObjectsDownloadSummaryTableHeader = viewer.Row{
+		"source",
+		"destination",
+		"size(bytes)",
+		"timeElapsed",
+	}
 )
 
 func bucketListViewer(o interface{}) viewer.Viewer {
@@ -24,7 +30,10 @@ func bucketListViewer(o interface{}) viewer.Viewer {
 	tViewer.SetTitle("Buckets")
 	data := o.(*bucketListOutput)
 	for _, bucket := range data.buckets {
-		tViewer.AddRow(viewer.Row{*bucket.name, bucket.creationDate.String()})
+		tViewer.AddRow(viewer.Row{
+			*bucket.name,
+			bucket.creationDate.String(),
+		})
 	}
 	return tViewer
 }
@@ -42,9 +51,31 @@ func bucketObjectsViewer(o interface{}) viewer.Viewer {
 	})
 
 	for _, content := range data.objects {
-		tViewer.AddRow(viewer.Row{*content.key, *content.sizeInBytes, *content.storageClass, *content.lastModified})
+		tViewer.AddRow(viewer.Row{
+			*content.key,
+			*content.sizeInBytes,
+			*content.storageClass,
+			*content.lastModified,
+		})
 	}
 
+	return tViewer
+
+}
+
+func bucketObjectsDownloadSummaryViewer(o interface{}) viewer.Viewer {
+	data := o.([]*bucketObjectsDownloadSummary)
+	tViewer := viewer.NewTableViewer()
+	tViewer.AddHeader(bucketObjectsDownloadSummaryTableHeader)
+	tViewer.SetTitle("Download Summary")
+	for _, summary := range data {
+		tViewer.AddRow(viewer.Row{
+			summary.source,
+			summary.destination,
+			summary.sizeinBytes,
+			summary.timeElapsed,
+		})
+	}
 	return tViewer
 
 }

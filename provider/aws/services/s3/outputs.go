@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+type bucketObjectsDownloadSummary struct {
+	source      string
+	destination string
+	sizeinBytes int64
+	timeElapsed time.Duration
+}
+
 type bucket struct {
 	name         *string
 	creationDate *time.Time

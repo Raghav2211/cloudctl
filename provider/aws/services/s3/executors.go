@@ -96,6 +96,7 @@ func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, k
 
 	clients, err := newClients(flag.Profile, flag.Region, flag.Debug, newClient, newS3Downloader)
 	if err != nil {
+		// TODO : handle error
 		panic("error occur during create client")
 	}
 
@@ -108,6 +109,7 @@ func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, k
 			path:       path,
 			recursive:  recursive,
 		},
+		Viewer: bucketObjectsDownloadSummaryViewer,
 	}
 }
 

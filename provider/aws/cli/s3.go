@@ -26,7 +26,7 @@ type bucketObjectDownloadCmd struct {
 	Recursive  bool   `name:"recursive" help:"Download objects recursively from provided key as prefix"`
 }
 
-type S3Command struct {
+type s3Command struct {
 	List                 listCmd                 `name:"ls" cmd:"" help:"List s3 buckets"`
 	ListBucketObjects    listBucketObjectsCmd    `name:"list-objects" cmd:"" help:"Bucket Objects list"`
 	BucketView           bucketViewCmd           `name:"config" cmd:"" help:"Bucket configuration"`

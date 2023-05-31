@@ -9,8 +9,7 @@ import (
 
 type CLI struct {
 	globals.CLIFlag
-	S3  cli.S3Command  `name:"s3" cmd:"" help:"operation on S3 buckets"`
-	EC2 cli.EC2Command `name:"ec2" cmd:"" help:"operation on ec2"`
+	AWS cli.AWSCmd `name:"aws" cmd:"" help:"AWS cloud provider commands"`
 }
 
 func main() {
@@ -19,8 +18,8 @@ func main() {
 		CLIFlag: globals.CLIFlag{},
 	}
 	ctx := kong.Parse(&cli,
-		kong.Name("raws"),
-		kong.Description("CloudCtl is a GO library that interacts with cloud providers and displays output in a human-readable fashion."),
+		kong.Name("cloudctl"),
+		kong.Description("cloudctl is a GO library that interacts with cloud providers and displays output in a human-readable fashion."),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{
 			Compact: true,

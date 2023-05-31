@@ -14,9 +14,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 )
 
-const (
-	AWS_DEFAULT_PROFILE = "AWS_DEFAULT_PROFILE"
-	AWS_DEFAULT_REGION  = "AWS_DEFAULT_REGION"
+var (
+	env_profile = []string{"AWS_DEFAULT_PROFILE", "AWS_PROFILE"}
+	env_region  = []string{"AWS_DEFAULT_REGION", "AWS_REGION"}
 )
 
 func NewSession(profile, region string, debug bool) (sess *session.Session, err error) {
@@ -28,10 +28,10 @@ func NewSession(profile, region string, debug bool) (sess *session.Session, err 
 		logLevel = aws.LogLevel(aws.LogDebugWithRequestRetries | aws.LogDebugWithRequestErrors)
 	}
 
-	// fetch profile from env `see:AWS_DEFAULT_PROFILE` if not provide via command
-	p := getEnv(profile, AWS_DEFAULT_PROFILE)
-	// fetch region from env `see:AWS_DEFAULT_REGION` if not provide via command
-	r := getEnv(region, AWS_DEFAULT_REGION)
+	// fetch profile from env `see:AWS_PROFILE` if not provide via command
+	p := getEnv(profile, env_profile)
+	// fetch region from env `see:AWS_REGION` if not provide via command
+	r := getEnv(region, env_region)
 
 	if len(r) == 0 {
 		prompt := &survey.Input{Message: "Enter region?"}
@@ -87,7 +87,6 @@ func newCred(profile *string) (cred *credentials.Credentials) {
 }
 
 func fetchConfiguredProfiles() ([]string, error) {
-
 	credFile := config.DefaultSharedCredentialsFilename()
 	f, err := ini.Load(credFile)
 	if err == nil {
@@ -103,9 +102,14 @@ func fetchConfiguredProfiles() ([]string, error) {
 	return nil, err
 }
 
-func getEnv(value, key string) string {
+func getEnv(value string, keys []string) string {
 	if len(value) == 0 {
-		return os.Getenv(key)
+		for _, key := range keys {
+			v := os.Getenv(key)
+			if len(v) != 0 {
+				return os.Getenv(key)
+			}
+		}
 	}
 	return value
 }

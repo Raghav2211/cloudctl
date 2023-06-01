@@ -14,7 +14,7 @@ const (
 	DATE_PASER = "2006-01-02 15:04:05"
 )
 
-func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string) *executor.CommandExecutor {
+func NewBucketListCommandExecutor(flag *globals.CLIFlag, from, to, bucketNameString string) *executor.CommandExecutor {
 	tz := ctltime.GetTZ(flag.TZShortIdentifier)
 	dFrom := new(time.Time)
 	dTo := new(time.Time)
@@ -47,6 +47,8 @@ func NewBucketListCommandExecutor(flag *globals.CLIFlag, from string, to string)
 			filter: &bucketListFilter{
 				creationDateFrom: dFrom,
 				creationDateTo:   dTo,
+				bucketNameString: &bucketNameString,
+				tz:               tz,
 			},
 			tz: tz,
 		},

@@ -6,8 +6,9 @@ import (
 )
 
 type listCmd struct {
-	CreationDateFrom string `name:"from" help:"Get list of bucket which start from this date(inclusive)"`
-	CreationDateTO   string `name:"to" help:"Get list of bucket which start to this date(inclusive)"`
+	BucketNameString string `name:"name" help:"Get list of bucket which contains provided value in their name"`
+	CreationDateFrom string `name:"from" help:"Get list of bucket which starts from provided date(inclusive)"`
+	CreationDateTO   string `name:"to" help:"Get list of bucket which ends to provided date(inclusive)"`
 }
 
 type listBucketObjectsCmd struct {
@@ -15,7 +16,7 @@ type listBucketObjectsCmd struct {
 	BucketName   string `name:"name" arg:"required"`
 }
 
-type bucketViewCmd struct {
+type bucketDefinitionCmd struct {
 	BucketName string `name:"name" arg:"required"`
 }
 
@@ -28,13 +29,13 @@ type bucketObjectDownloadCmd struct {
 
 type S3Command struct {
 	List                 listCmd                 `name:"ls" cmd:"" help:"List s3 buckets"`
-	ListBucketObjects    listBucketObjectsCmd    `name:"list-objects" cmd:"" help:"Bucket Objects list"`
-	BucketView           bucketViewCmd           `name:"config" cmd:"" help:"Bucket configuration"`
+	ListBucketObjects    listBucketObjectsCmd    `name:"list-objects" cmd:"" help:"List s3 bucket objects"`
+	BucketDefinition     bucketDefinitionCmd     `name:"def" cmd:"" help:"Get bucket definition"`
 	BucketObjectDownload bucketObjectDownloadCmd `name:"get" cmd:"" help:"Download bucket object(s)"`
 }
 
 func (cmd *listCmd) Run(flag *globals.CLIFlag) error {
-	icmd := ctls3.NewBucketListCommandExecutor(flag, cmd.CreationDateFrom, cmd.CreationDateTO)
+	icmd := ctls3.NewBucketListCommandExecutor(flag, cmd.CreationDateFrom, cmd.CreationDateTO, cmd.BucketNameString)
 	err := icmd.Execute()
 	if err != nil {
 		return err
@@ -51,7 +52,7 @@ func (cmd *listBucketObjectsCmd) Run(flag *globals.CLIFlag) error {
 	return nil
 }
 
-func (cmd *bucketViewCmd) Run(flag *globals.CLIFlag) error {
+func (cmd *bucketDefinitionCmd) Run(flag *globals.CLIFlag) error {
 	icmd := ctls3.NewBucketViewCommandExecutor(flag, cmd.BucketName)
 	err := icmd.Execute()
 	if err != nil {

@@ -61,7 +61,7 @@ func (f bucketListFetcher) Fetch() (interface{}, error) {
 	op := []*bucket{}
 
 	for _, o := range buckets.Buckets {
-		if f.filter.Apply(o, f.tz) {
+		if f.filter.Apply(o) {
 			op = append(op, &bucket{
 				name:         o.Name,
 				creationDate: f.tz.AdaptTimezone(o.CreationDate),

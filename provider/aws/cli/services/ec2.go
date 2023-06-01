@@ -6,16 +6,15 @@ import (
 )
 
 type eC2ListCmd struct {
-	// Test string `name:"testStr" cmd:""`
 }
 
-type describeInstanceCmd struct {
+type instanceDefinitionCmd struct {
 	Id string `name:"name" arg:"required"`
 }
 
 type EC2Command struct {
-	List             eC2ListCmd          `name:"ls" cmd:"" help:"ec2 lists"`
-	DescribeInstance describeInstanceCmd `name:"desc" cmd:"" help:"Avaiable region list"`
+	List               eC2ListCmd            `name:"ls" cmd:"" help:"List ec2 instances"`
+	InstacneDefinition instanceDefinitionCmd `name:"def" cmd:"" help:"Get ec2 instance definition"`
 }
 
 func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
@@ -28,7 +27,7 @@ func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
 
 }
 
-func (cmd *describeInstanceCmd) Run(globals *globals.CLIFlag) error {
+func (cmd *instanceDefinitionCmd) Run(globals *globals.CLIFlag) error {
 	icmd := rawsec2.NewinstanceDescribeCommandExecutor(globals, cmd.Id)
 	err := icmd.Execute()
 	if err != nil {
@@ -36,7 +35,3 @@ func (cmd *describeInstanceCmd) Run(globals *globals.CLIFlag) error {
 	}
 	return nil
 }
-
-// func (cmd *EC2Command.Command) Run(globals *globals.CLIFlags) error {
-
-// }

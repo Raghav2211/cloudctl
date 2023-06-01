@@ -22,7 +22,9 @@ func (exe *CommandExecutor) Execute() error {
 	}
 	if exe.Viewer != nil {
 		viewType := exe.Viewer(data)
-		viewType.View()
+		if viewType != nil {
+			viewType.View()
+		}
 	}
 
 	black := color.New(color.FgGreen)

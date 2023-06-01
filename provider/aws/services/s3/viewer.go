@@ -2,6 +2,7 @@ package s3
 
 import (
 	"cloudctl/viewer"
+	"fmt"
 	"sort"
 )
 
@@ -25,10 +26,16 @@ var (
 )
 
 func bucketListViewer(o interface{}) viewer.Viewer {
+
+	data := o.(*bucketListOutput)
+	if len(data.buckets) == 0 {
+		fmt.Println("No buckets found!!")
+		return nil
+	}
+
 	tViewer := viewer.NewTableViewer()
 	tViewer.AddHeader(bucketListTableHeader)
 	tViewer.SetTitle("Buckets")
-	data := o.(*bucketListOutput)
 	for _, bucket := range data.buckets {
 		tViewer.AddRow(viewer.Row{
 			*bucket.name,

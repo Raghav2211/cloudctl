@@ -13,8 +13,8 @@ type listCmd struct {
 
 type listBucketObjectsCmd struct {
 	ObjectPrefix  string `name:"prefix" help:"Bucket Object prefix"`
-	MaxKeysReturn int    `name:"max-keys" default:"1000" help:"Number of bucket objects return | Default value is 1000"`
-	Full          bool   `name:"all" help:"It's a heavy operation & will take cost. This mode will list all bucket objects with applied filter"`
+	MaxKeysReturn int    `name:"max-keys" default:"1000" help:"Number of bucket objects return | Default value is 1000"`                         // TODO: apply this
+	Full          bool   `name:"all" help:"It's a heavy operation & will take cost. This mode will list all bucket objects with applied filter"` // TODO: apply this
 	BucketName    string `name:"name" arg:"required" help:"Bucket name"`
 }
 

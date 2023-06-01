@@ -12,19 +12,21 @@ type listCmd struct {
 }
 
 type listBucketObjectsCmd struct {
-	BucketPrefix string `name:"prefix"`
-	BucketName   string `name:"name" arg:"required"`
+	ObjectPrefix  string `name:"prefix" help:"Bucket Object prefix"`
+	MaxKeysReturn int    `name:"max-keys" default:"1000" help:"Number of bucket objects return | Default value is 1000"`
+	Full          bool   `name:"all" help:"It's a heavy operation & will take cost. This mode will list all bucket objects with applied filter"`
+	BucketName    string `name:"name" arg:"required" help:"Bucket name"`
 }
 
 type bucketDefinitionCmd struct {
-	BucketName string `name:"name" arg:"required"`
+	BucketName string `name:"name" arg:"required" help:"Bucket name"`
 }
 
 type bucketObjectDownloadCmd struct {
-	BucketName string `name:"name" arg:"required"`
-	Key        string `name:"key" arg:"required"`
-	Path       string `name:"path" type:"path" help:"Path to store the object(s), Default is current directory" arg:"required" default:"."`
-	Recursive  bool   `name:"recursive" help:"Download objects recursively from provided key as prefix"`
+	BucketName string `name:"name" arg:"required" help:"Bucket name"`
+	Key        string `name:"key" arg:"required" help:"Bucket Key or Key prefix"`
+	Path       string `name:"path" type:"path" help:"Path to local store the object(s), Default is current directory" arg:"required" default:"."`
+	Recursive  bool   `name:"recursive" help:"This mode will download all objects recursively with provided key as prefix"`
 }
 
 type S3Command struct {
@@ -44,7 +46,7 @@ func (cmd *listCmd) Run(flag *globals.CLIFlag) error {
 }
 
 func (cmd *listBucketObjectsCmd) Run(flag *globals.CLIFlag) error {
-	icmd := ctls3.NewBucketObjectListCommandExecutor(flag, cmd.BucketName, cmd.BucketPrefix)
+	icmd := ctls3.NewBucketObjectListCommandExecutor(flag, cmd.BucketName, cmd.ObjectPrefix)
 	err := icmd.Execute()
 	if err != nil {
 		return err

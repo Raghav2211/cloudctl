@@ -53,14 +53,13 @@ func (f bucketListFetcher) Fetch() (interface{}, error) {
 
 	// fmt.Println(*f.filter.creationDateFrom, " - ", *f.filter.creationDateTo)
 
-	buckets, err := f.client.S3.ListBuckets(&s3.ListBucketsInput{})
+	apiOutput, err := f.client.S3.ListBuckets(&s3.ListBucketsInput{})
 	if err != nil {
 		return nil, err
 	}
 
 	op := []*bucket{}
-
-	for _, o := range buckets.Buckets {
+	for _, o := range apiOutput.Buckets {
 		if f.filter.Apply(o) {
 			op = append(op, &bucket{
 				name:         o.Name,
@@ -76,26 +75,19 @@ func (f bucketListFetcher) Fetch() (interface{}, error) {
 }
 
 func (f bucketObjectsFetcher) Fetch() (interface{}, error) {
+	output := []*object{}
 
-	input := &s3.ListObjectsInput{}
-	input.Bucket = &f.bucketName
-	input.Prefix = &f.objectPrefix
-	listBucketObjects, err := f.client.S3.ListObjects(input)
-	if err != nil {
-		return nil, err
-	}
+	objectsPtr, _ := fetchBucketObjects(f.bucketName, f.objectPrefix, f.client) // TODO: handle error
 
-	objects := []*object{}
-
-	for _, content := range listBucketObjects.Contents {
-		objects = append(objects, &object{
-			key:          content.Key,
-			sizeInBytes:  content.Size,
-			storageClass: content.StorageClass,
-			lastModified: f.tz.AdaptTimezone(content.LastModified),
+	for _, o := range *objectsPtr {
+		output = append(output, &object{
+			key:          o.Key,
+			sizeInBytes:  o.Size,
+			storageClass: o.StorageClass,
+			lastModified: f.tz.AdaptTimezone(o.LastModified),
 		})
 	}
-	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: objects}, nil
+	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output}, nil
 }
 
 func (f bucketConfigurationFetcher) Fetch() (interface{}, error) {
@@ -139,6 +131,34 @@ func (f bucketObjectsDownloadFetcher) Fetch() (interface{}, error) {
 	go downloadObject(f.bucketName, f.key, f.path, f.client, downloadSummaryChan)
 	downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
 	return downloadSummaries, nil
+}
+
+func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[]*s3.Object, error) {
+
+	var recursiveFetch func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarket string, client *aws.Client) error
+
+	recursiveFetch = func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarker string, client *aws.Client) error {
+		input := &s3.ListObjectsInput{}
+		input.Bucket = &bucketName
+		input.Prefix = &objectPrefix
+		if nextMarker != "" {
+			input.Marker = &nextMarker
+		}
+
+		apiOutput, err := client.S3.ListObjects(input)
+		if err != nil {
+			return err
+		}
+		*objectsPtr = append(*objectsPtr, apiOutput.Contents...)
+		if *apiOutput.IsTruncated {
+			nextMarker = *apiOutput.Contents[len(apiOutput.Contents)-1].Key
+			recursiveFetch(bucketName, objectPrefix, objectsPtr, nextMarker, client)
+		}
+		return nil
+	}
+	objects := []*s3.Object{}
+	recursiveFetch(bucketName, objectPrefix, &objects, "", client)
+	return &objects, nil
 }
 
 func downloadObject(bucketName, key, path string, client *aws.Client, downloadSummaryChan chan<- *bucketObjectsDownloadSummary) {

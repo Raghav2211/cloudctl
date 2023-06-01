@@ -9,10 +9,11 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-//TODO: custom filters
+//TODO: creatio of filters more dynamically : initial thought :- can use a queue which contains condition with operator
+//and downstream filter only apply this filter
 
 // type filter struct {
-// 	conditions
+// 	conditions , operators
 // }
 
 type bucketListFilter struct {

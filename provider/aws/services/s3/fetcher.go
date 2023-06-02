@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-var bucketInfoRetrieverFuncs = []func(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup){
+var bucketInfoRetrieverFuncs = []func(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup){
 	getBucketPolicy,
 	getBucketVersionConfig,
 	getBucketTags,
@@ -49,35 +49,38 @@ type bucketObjectsDownloadFetcher struct {
 	recursive  bool
 }
 
-func (f bucketListFetcher) Fetch() (interface{}, error) {
-
-	// fmt.Println(*f.filter.creationDateFrom, " - ", *f.filter.creationDateTo)
+func (f bucketListFetcher) Fetch() interface{} {
 
 	apiOutput, err := f.client.S3.ListBuckets(&s3.ListBucketsInput{})
 	if err != nil {
-		return nil, err
+		return &bucketListOutput{err: &aws.APIException{}}
 	}
-
-	op := []*bucket{}
+	if len(apiOutput.Buckets) == 0 {
+		return &bucketListOutput{err: NoBucketFound{}}
+	}
+	buckets := []*bucket{}
 	for _, o := range apiOutput.Buckets {
 		if f.filter.Apply(o) {
-			op = append(op, &bucket{
+			buckets = append(buckets, &bucket{
 				name:         o.Name,
 				creationDate: f.tz.AdaptTimezone(o.CreationDate),
 			})
 		}
 	}
 	// default sort(asc) by creation darte
-	sort.Slice(op, func(i, j int) bool {
-		return op[i].creationDate.Before(*op[j].creationDate)
+	sort.Slice(buckets, func(i, j int) bool {
+		return buckets[i].creationDate.Before(*buckets[j].creationDate)
 	})
-	return &bucketListOutput{buckets: op}, nil
+	return &bucketListOutput{buckets: buckets, err: nil}
 }
 
-func (f bucketObjectsFetcher) Fetch() (interface{}, error) {
+func (f bucketObjectsFetcher) Fetch() interface{} {
 	output := []*object{}
 
-	objectsPtr, _ := fetchBucketObjects(f.bucketName, f.objectPrefix, f.client) // TODO: handle error
+	objectsPtr, err := fetchBucketObjects(f.bucketName, f.objectPrefix, f.client)
+	if err != nil {
+		return &bucketObjectListOutput{err: &aws.APIException{}} // TODO : handle specific error
+	}
 
 	for _, o := range *objectsPtr {
 		output = append(output, &object{
@@ -87,27 +90,27 @@ func (f bucketObjectsFetcher) Fetch() (interface{}, error) {
 			lastModified: f.tz.AdaptTimezone(o.LastModified),
 		})
 	}
-	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output}, nil
+	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output, err: nil}
 }
 
-func (f bucketConfigurationFetcher) Fetch() (interface{}, error) {
+func (f bucketConfigurationFetcher) Fetch() interface{} {
 
-	bucketInfo := &bucketInfo{}
-	bucketInfo.SetBucketName(f.bucketName)
+	definition := &bucketDefinition{}
+	definition.SetBucketName(f.bucketName)
 
 	wg := new(sync.WaitGroup)
 	wg.Add(len(bucketInfoRetrieverFuncs))
 
 	for _, function := range bucketInfoRetrieverFuncs {
-		go function(&f.bucketName, f.client, bucketInfo, wg)
+		go function(&f.bucketName, f.client, definition, wg)
 	}
 	wg.Wait()
-	return bucketInfo, nil
+	return definition
 }
 
-func (f bucketObjectsDownloadFetcher) Fetch() (interface{}, error) {
-	downloadSummaryChan := make(chan *bucketObjectsDownloadSummary)
-	downloadSummaries := []*bucketObjectsDownloadSummary{}
+func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
+	downloadSummaryChan := make(chan *objectDownloadSummary)
+	downloadSummaries := []*objectDownloadSummary{}
 	defer close(downloadSummaryChan)
 	if f.recursive {
 		input := &s3.ListObjectsInput{}
@@ -115,9 +118,7 @@ func (f bucketObjectsDownloadFetcher) Fetch() (interface{}, error) {
 		input.Prefix = &f.key
 		listBucketObjects, err := f.client.S3.ListObjects(input)
 		if err != nil {
-			// TODO : handle error
-			fmt.Println("error occur duing list of objects")
-			return nil, err
+			return &bucketOjectsDownloadSummary{err: &aws.APIException{}} // TODO : handle specific error
 		}
 
 		for _, object := range listBucketObjects.Contents {
@@ -126,11 +127,11 @@ func (f bucketObjectsDownloadFetcher) Fetch() (interface{}, error) {
 		for i := 0; i < len(listBucketObjects.Contents); i++ {
 			downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
 		}
-		return downloadSummaries, nil
+		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, downloadSummaries: downloadSummaries, err: nil}
 	}
 	go downloadObject(f.bucketName, f.key, f.path, f.client, downloadSummaryChan)
 	downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
-	return downloadSummaries, nil
+	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, downloadSummaries: downloadSummaries, err: nil}
 }
 
 func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[]*s3.Object, error) {
@@ -161,7 +162,7 @@ func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[
 	return &objects, nil
 }
 
-func downloadObject(bucketName, key, path string, client *aws.Client, downloadSummaryChan chan<- *bucketObjectsDownloadSummary) {
+func downloadObject(bucketName, key, path string, client *aws.Client, downloadSummaryChan chan<- *objectDownloadSummary) {
 	start := time.Now()
 	downloadFileAbsPath := fmt.Sprintf("%s/%s", path, key)
 
@@ -170,36 +171,34 @@ func downloadObject(bucketName, key, path string, client *aws.Client, downloadSu
 	if _, err := os.Stat(fileDir); os.IsNotExist(err) {
 		err := os.MkdirAll(fileDir, os.ModePerm)
 		if err != nil {
-			//TODO: handle error
 			fmt.Println("erro occur during create dir ", err)
 		}
 	}
 
 	file, err := os.Create(downloadFileAbsPath)
-	if err != nil {
-		//TODO: handle error
-		fmt.Println("[file] err occur on ", key, err)
-	}
 	defer file.Close()
-
-	numBytesWrite, err := client.S3Downloader.Download(file, &s3.GetObjectInput{
-		Bucket: &bucketName,
-		Key:    &key,
-	})
 	if err != nil {
-		//TODO: handle error
-		fmt.Println("[numBytesWrite] err occur on ", key)
-	}
+		downloadSummaryChan <- &objectDownloadSummary{err: err}
+	} else {
+		numBytesWrite, err := client.S3Downloader.Download(file, &s3.GetObjectInput{
+			Bucket: &bucketName,
+			Key:    &key,
+		})
+		if err != nil {
+			downloadSummaryChan <- &objectDownloadSummary{err: err}
+		} else {
+			downloadSummaryChan <- &objectDownloadSummary{
+				source:      key,
+				destination: file.Name(),
+				sizeinBytes: numBytesWrite,
+				timeElapsed: time.Since(start),
+			}
 
-	downloadSummaryChan <- &bucketObjectsDownloadSummary{
-		source:      key,
-		destination: file.Name(),
-		sizeinBytes: numBytesWrite,
-		timeElapsed: time.Since(start),
+		}
 	}
 }
 
-func getBucketPolicy(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketPolicy(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
 	defer wg.Done()
 	res, err := client.S3.GetBucketPolicy(&s3.GetBucketPolicyInput{Bucket: bucket})
 	if err != nil {
@@ -211,7 +210,7 @@ func getBucketPolicy(bucket *string, client *aws.Client, bucketinfo *bucketInfo,
 	bucketinfo.SetPolicy(res)
 }
 
-func getBucketVersionConfig(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketVersionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
 	defer wg.Done()
 	res, err := client.S3.GetBucketVersioning(&s3.GetBucketVersioningInput{Bucket: bucket})
 	if err != nil {
@@ -221,7 +220,7 @@ func getBucketVersionConfig(bucket *string, client *aws.Client, bucketinfo *buck
 	bucketinfo.SetVersion(res)
 }
 
-func getBucketTags(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketTags(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
 	defer wg.Done()
 	res, err := client.S3.GetBucketTagging(&s3.GetBucketTaggingInput{Bucket: bucket})
 	if err != nil {
@@ -231,7 +230,7 @@ func getBucketTags(bucket *string, client *aws.Client, bucketinfo *bucketInfo, w
 	bucketinfo.SetTags(res)
 }
 
-func getBucketencryptionConfig(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketencryptionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
 	defer wg.Done()
 	res, err := client.S3.GetBucketEncryption(&s3.GetBucketEncryptionInput{Bucket: bucket})
 	if err != nil {
@@ -241,7 +240,7 @@ func getBucketencryptionConfig(bucket *string, client *aws.Client, bucketinfo *b
 	bucketinfo.SetEncryptionConfig(res)
 }
 
-func getBucketLifecycleConfig(bucket *string, client *aws.Client, bucketinfo *bucketInfo, wg *sync.WaitGroup) {
+func getBucketLifecycleConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
 	defer wg.Done()
 	res, err := client.S3.GetBucketLifecycleConfiguration(&s3.GetBucketLifecycleConfigurationInput{Bucket: bucket})
 

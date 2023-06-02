@@ -71,7 +71,7 @@ func bucketObjectsViewer(o interface{}) viewer.Viewer {
 }
 
 func bucketObjectsDownloadSummaryViewer(o interface{}) viewer.Viewer {
-	data := o.([]*bucketObjectsDownloadSummary)
+	data := o.([]*objectDownloadSummary)
 	tViewer := viewer.NewTableViewer()
 	tViewer.AddHeader(bucketObjectsDownloadSummaryTableHeader)
 	tViewer.SetTitle("Download Summary")
@@ -88,6 +88,6 @@ func bucketObjectsDownloadSummaryViewer(o interface{}) viewer.Viewer {
 }
 
 func bucketConfigurationViewer(o interface{}) viewer.Viewer {
-	o.(*bucketInfo).Pretty()
+	o.(*bucketDefinition).Pretty()
 	return nil
 }

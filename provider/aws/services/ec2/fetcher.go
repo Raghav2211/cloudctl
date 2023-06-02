@@ -15,14 +15,17 @@ type instanceListFetcher struct {
 	client *aws.Client
 }
 
-type instanceInfoFetcher struct {
+type instanceDefinitionFetcher struct {
 	client *aws.Client
 	id     *string
 }
 
-func (f instanceListFetcher) Fetch() (interface{}, error) {
+func (f instanceListFetcher) Fetch() interface{} {
 
 	result, err := f.client.EC2.DescribeInstances(nil)
+	if err != nil {
+		return &instanceListOutput{err: &aws.APIException{}} // TODO handle specific error
+	}
 	// TODO : handle next token scenario
 	//fmt.Println("nextToken  -- ", result.NextToken)
 
@@ -47,26 +50,28 @@ func (f instanceListFetcher) Fetch() (interface{}, error) {
 			}
 		}
 	}
+
+	return &instanceListOutput{instances: instances, err: nil}
+}
+
+func (f instanceDefinitionFetcher) Fetch() interface{} {
+
+	definition, err := fetchInstanceDefinition(f.id, f.client)
 	if err != nil {
-		return nil, err
+		return &instanceDefinition{err: err} // TODO : handle specific error
 	}
-	return &instanceListOutput{instances: instances}, nil
+
+	return definition
 }
 
-func (f instanceInfoFetcher) Fetch() (instanceDetailView interface{}, err error) {
-
-	instanceDetailView, err = fetchInstanceDetail(f.id, f.client)
-	return
-}
-
-func fetchInstanceDetail(instanceId *string, client *aws.Client) (*instanceDetailView, error) {
+func fetchInstanceDefinition(instanceId *string, client *aws.Client) (*instanceDefinition, error) {
 	// doneCh := make(chan struct{})
 	volumeOutputChan := make(chan []*instanceVolume)
 	sgOutputChan := make(chan *instanceSGSummary)
 	eniOutputChan := make(chan []*instanceNetworkinterface)
 	// defer close(doneCh)
 
-	instancesChan := getInstacneDetail(instanceId, client)
+	instancesChan := fetchInstacneDetail(instanceId, client)
 
 	reservations := <-instancesChan
 	if len(reservations) > 1 {
@@ -121,8 +126,7 @@ func fetchInstanceDetail(instanceId *string, client *aws.Client) (*instanceDetai
 			fetchNetworkSummary(eniOutputChan, instance.NetworkInterfaces)
 		}()
 	}
-	// fmt.Println("eniOutputChan  ==> ", <-eniOutputChan)
-	return &instanceDetailView{
+	return &instanceDefinition{
 		summary:      summary,
 		detail:       detail,
 		volumes:      <-volumeOutputChan,
@@ -130,7 +134,7 @@ func fetchInstanceDetail(instanceId *string, client *aws.Client) (*instanceDetai
 		ntwrkSummary: <-eniOutputChan,
 	}, nil
 }
-func getInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Reservation {
+func fetchInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Reservation {
 	instancesChan := make(chan []*ec2.Reservation)
 	go func() {
 		defer close(instancesChan)

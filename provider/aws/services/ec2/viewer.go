@@ -107,7 +107,7 @@ func instanceInfoViewer(o interface{}) viewer.Viewer {
 	iSgOutboundTviewerChan := make(chan *viewer.TableViewer)
 	iVolumeTviewerChan := make(chan *viewer.TableViewer)
 	iNetworkTviewerChan := make(chan *viewer.TableViewer)
-	instance := o.(*instanceDetailView)
+	instance := o.(*instanceDefinition)
 	go func() {
 		defer close(iSummaryTviewerChan)
 		renderInstanceSummary(iSummaryTviewerChan, instance.summary)

@@ -16,10 +16,7 @@ type CommandExecutor struct {
 
 func (exe *CommandExecutor) Execute() error {
 	start := time.Now()
-	data, err := exe.Fetcher.Fetch()
-	if err != nil {
-		return err
-	}
+	data := exe.Fetcher.Fetch()
 	if exe.Viewer != nil {
 		viewType := exe.Viewer(data)
 		if viewType != nil {

@@ -91,14 +91,16 @@ type instanceNetworkinterface struct {
 	securityGroups      []*string
 }
 
-type instanceDetailView struct {
+type instanceDefinition struct {
 	summary      *instanceSummary
 	detail       *instanceDetail
 	volumes      []*instanceVolume
 	sgSummary    *instanceSGSummary
 	ntwrkSummary []*instanceNetworkinterface
+	err          error
 }
 
 type instanceListOutput struct {
 	instances []*instance
+	err       error
 }

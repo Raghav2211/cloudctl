@@ -2,9 +2,9 @@ package ec2
 
 import (
 	"cloudctl/provider/aws"
+	"cloudctl/viewer"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
@@ -22,40 +22,19 @@ type instanceDefinitionFetcher struct {
 
 func (f instanceListFetcher) Fetch() interface{} {
 
-	result, err := f.client.EC2.DescribeInstances(nil)
-	if err != nil {
-		return &instanceListOutput{err: &aws.APIException{}} // TODO handle specific error
-	}
-	// TODO : handle next token scenario
-	//fmt.Println("nextToken  -- ", result.NextToken)
-
+	apiOutput, err := fetchInstanceList(f.client)
 	instances := []*instance{}
-
-	for _, reservation := range result.Reservations {
-		if len(reservation.Instances) != 0 {
-			for _, o := range reservation.Instances {
-
-				privateIp := getPrivateIp(o)
-
-				publicIp := getPublicIp(o)
-				instances = append(instances, &instance{
-					id:         o.InstanceId,
-					typee:      o.InstanceType,
-					state:      o.State.Name,
-					az:         o.Placement.AvailabilityZone,
-					publicIp:   &publicIp,
-					privateIp:  &privateIp,
-					launchTime: o.LaunchTime,
-				})
-			}
-		}
+	for _, o := range *apiOutput {
+		instances = append(instances, NewInstanceOutput(o))
 	}
-
+	if err != nil {
+		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
+		return &instanceListOutput{instances: instances, err: errorInfo}
+	}
 	return &instanceListOutput{instances: instances, err: nil}
 }
 
 func (f instanceDefinitionFetcher) Fetch() interface{} {
-
 	definition, err := fetchInstanceDefinition(f.id, f.client)
 	if err != nil {
 		return &instanceDefinition{err: err} // TODO : handle specific error
@@ -65,11 +44,10 @@ func (f instanceDefinitionFetcher) Fetch() interface{} {
 }
 
 func fetchInstanceDefinition(instanceId *string, client *aws.Client) (*instanceDefinition, error) {
-	// doneCh := make(chan struct{})
+
 	volumeOutputChan := make(chan []*instanceVolume)
 	sgOutputChan := make(chan *instanceSGSummary)
 	eniOutputChan := make(chan []*instanceNetworkinterface)
-	// defer close(doneCh)
 
 	instancesChan := fetchInstacneDetail(instanceId, client)
 
@@ -83,33 +61,6 @@ func fetchInstanceDefinition(instanceId *string, client *aws.Client) (*instanceD
 	}
 	instance := reservation.Instances[len(reservation.Instances)-1]
 
-	iamProfileARN := "NA"
-	if instance.IamInstanceProfile != nil {
-		iamProfileARN = *instance.IamInstanceProfile.Arn
-	}
-
-	// fmt.Println("instance ", instance.NetworkInterfaces)
-
-	summary := &instanceSummary{
-		id:           *instance.InstanceId,
-		publicIp:     getPublicIp(instance),
-		privateIp:    getPrivateIp(instance),
-		state:        *instance.State.Name,
-		vpcId:        *instance.VpcId,
-		typee:        *instance.InstanceType,
-		iamroleArn:   iamProfileARN,
-		subnetId:     *instance.SubnetId,
-		privateIpDNS: *instance.PrivateDnsName,
-		publicIpDNS:  *instance.PublicDnsName,
-	}
-
-	detail := &instanceDetail{
-		platform:   "N/A", // TODO handle platforrm if nil
-		amiId:      *instance.ImageId,
-		monitor:    *instance.Monitoring.State,
-		osdetails:  *instance.PlatformDetails,
-		launchTime: *instance.LaunchTime,
-	}
 	if instance.BlockDeviceMappings != nil {
 		go func() {
 			defer close(volumeOutputChan)
@@ -127,12 +78,38 @@ func fetchInstanceDefinition(instanceId *string, client *aws.Client) (*instanceD
 		}()
 	}
 	return &instanceDefinition{
-		summary:      summary,
-		detail:       detail,
+		summary:      newInstanceSummary(instance),
+		detail:       newInstanceDetail(instance),
 		volumes:      <-volumeOutputChan,
 		sgSummary:    <-sgOutputChan,
 		ntwrkSummary: <-eniOutputChan,
 	}, nil
+}
+func fetchInstanceList(client *aws.Client) (*[]*ec2.Instance, error) {
+
+	var fetch func(nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error
+
+	fetch = func(nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error {
+		result, err := client.EC2.DescribeInstances(&ec2.DescribeInstancesInput{NextToken: &nextMarker})
+		if err != nil {
+			return err
+		}
+		for _, reservation := range result.Reservations {
+			*instances = append(*instances, reservation.Instances...)
+		}
+		if result.NextToken != nil {
+			nextMarker = *result.NextToken
+			if err = fetch(nextMarker, instances, client); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	nextMarker := ""
+	instances := []*ec2.Instance{}
+	err := fetch(nextMarker, &instances, client)
+	return &instances, err
 }
 func fetchInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Reservation {
 	instancesChan := make(chan []*ec2.Reservation)
@@ -148,44 +125,21 @@ func fetchInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Res
 	return instancesChan
 }
 
-func fetchInstanceVolume(outputchan chan<- []*instanceVolume, volumemappings []*ec2.InstanceBlockDeviceMapping, client *aws.Client) {
+func fetchInstanceVolume(volumesChan chan<- []*instanceVolume, volumemappings []*ec2.InstanceBlockDeviceMapping, client *aws.Client) {
 	volumeIds := []*string{}
-	op := []*instanceVolume{}
+	volumes := []*instanceVolume{}
 	for _, b := range volumemappings {
 		volumeIds = append(volumeIds, b.Ebs.VolumeId)
 	}
 	data, err := client.EC2.DescribeVolumes(&ec2.DescribeVolumesInput{VolumeIds: volumeIds})
 	if err != nil {
 		fmt.Println("error occurred in getInstanceVolume", err.Error())
-		outputchan <- op
+		volumesChan <- volumes
 	}
-
 	for _, volume := range data.Volumes {
-
-		attachments := []*volumeAttachment{}
-		for _, attachment := range volume.Attachments {
-			attachments = append(attachments, &volumeAttachment{
-				id:                  *attachment.VolumeId,
-				time:                *attachment.AttachTime,
-				deleteOnTermination: *attachment.DeleteOnTermination,
-				device:              *attachment.Device,
-				state:               *attachment.State,
-			})
-		}
-		kmsKey := "N/A"
-		if volume.KmsKeyId != nil {
-			kmsKey = *volume.KmsKeyId
-		}
-		op = append(op, &instanceVolume{
-			attachments:  attachments,
-			creationTime: *volume.CreateTime,
-			size:         *volume.Size,
-			isEncrypt:    *volume.Encrypted,
-			kmsKey:       kmsKey,
-			state:        *volume.State,
-		})
+		volumes = append(volumes, NewInstanceVolume(volume))
 	}
-	outputchan <- op
+	volumesChan <- volumes
 }
 
 func fetchSecurityGroupsDetail(outputChan chan<- *instanceSGSummary, enis []*ec2.InstanceNetworkInterface, client *aws.Client) {
@@ -200,108 +154,16 @@ func fetchSecurityGroupsDetail(outputChan chan<- *instanceSGSummary, enis []*ec2
 		fmt.Println("error occured fetchSecurityGroupsDetail ", err)
 	}
 	instanceSgSummary := &instanceSGSummary{groupIds: securityGroupIds}
-	inboundRules := []*sgInboundRule{}
-	outboundRules := []*sgOutboundRule{}
+	ingressRules := []*ingressRule{}
+	egressRules := []*egressRule{}
 	for _, sg := range data.SecurityGroups {
-
-		sgIdWithName := fmt.Sprintf("%s(%s)", *sg.GroupId, *sg.GroupName)
-		for _, inboundrule := range sg.IpPermissions {
-			portRange := "ALL" // handle if IpProtocol is -1
-			protocol := "ALL"  // handle if IpProtocol is -1
-			if *inboundrule.IpProtocol != "-1" {
-				portRange = fmt.Sprintf("%d", *inboundrule.ToPort)
-				if *inboundrule.FromPort != *inboundrule.ToPort {
-					portRange = fmt.Sprintf("%d-%d", *inboundrule.FromPort, *inboundrule.ToPort)
-				}
-				protocol = strings.ToUpper(*inboundrule.IpProtocol)
-			}
-			for _, userIdGroupPair := range inboundrule.UserIdGroupPairs {
-				description := userIdGroupPair.Description
-				if description == nil {
-					description = sg.Description
-				}
-				inboundRules = append(inboundRules, &sgInboundRule{
-					portRange: portRange,
-					protocol:  protocol,
-					source:    *userIdGroupPair.GroupId,
-					sgId:      sgIdWithName,
-					desc:      *description,
-				})
-			}
-
-			for _, ipRange := range inboundrule.IpRanges {
-				description := ipRange.Description
-				if description == nil {
-					description = sg.Description
-				}
-				inboundRules = append(inboundRules, &sgInboundRule{
-					portRange: portRange,
-					protocol:  protocol,
-					source:    *ipRange.CidrIp,
-					sgId:      sgIdWithName,
-					desc:      *description,
-				})
-			}
-
-			for _, ipRange := range inboundrule.Ipv6Ranges {
-				description := ipRange.Description
-				if description == nil {
-					description = sg.Description
-				}
-				inboundRules = append(inboundRules, &sgInboundRule{
-					portRange: portRange,
-					protocol:  protocol,
-					source:    *ipRange.CidrIpv6,
-					sgId:      sgIdWithName,
-					desc:      *description,
-				})
-			}
-
-		}
-		for _, outboundrule := range sg.IpPermissionsEgress {
-			portRange := "ALL" // handle if IpProtocol is -1
-			protocol := "ALL"  // handle if IpProtocol is -1
-			if *outboundrule.IpProtocol != "-1" {
-				portRange = fmt.Sprintf("%d", *outboundrule.FromPort)
-				if (outboundrule.FromPort != nil || outboundrule.ToPort != nil) && (*outboundrule.FromPort != *outboundrule.ToPort) {
-					portRange = fmt.Sprintf("%d-%d", *outboundrule.FromPort, *outboundrule.ToPort)
-				}
-				protocol = strings.ToUpper(*outboundrule.IpProtocol)
-			}
-
-			for _, ipRange := range outboundrule.IpRanges {
-				description := ipRange.Description
-				if description == nil {
-					description = sg.Description
-				}
-				outboundRules = append(outboundRules, &sgOutboundRule{
-					portRange: portRange,
-					protocol:  protocol,
-					source:    *ipRange.CidrIp,
-					sgId:      sgIdWithName,
-					desc:      *description,
-				})
-			}
-
-			for _, ipRange := range outboundrule.Ipv6Ranges {
-				description := ipRange.Description
-				if ipRange.Description == nil {
-					description = sg.Description
-				}
-				outboundRules = append(outboundRules, &sgOutboundRule{
-					portRange: portRange,
-					protocol:  protocol,
-					source:    *ipRange.CidrIpv6,
-					sgId:      sgIdWithName,
-					desc:      *description,
-				})
-			}
-		}
+		ingressRules = append(ingressRules, NewSecurityIngressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissions)...)
+		egressRules = append(egressRules, NewSecurityEgressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissionsEgress)...)
 	}
-	// udpate inbound Rules
-	instanceSgSummary.inboundRules = inboundRules
-	// update outbound Rules
-	instanceSgSummary.outboundRules = outboundRules
+	// udpate ingress Rules
+	instanceSgSummary.ingressRules = ingressRules
+	// update egress Rules
+	instanceSgSummary.egressRules = egressRules
 
 	outputChan <- instanceSgSummary
 }

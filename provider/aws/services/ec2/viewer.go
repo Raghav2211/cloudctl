@@ -184,7 +184,7 @@ func renderInstanceSgSummaryInbound(outputChan chan<- *viewer.TableViewer, o *in
 	tViewer.SetTitle("SG/Inbound")
 	tViewer.AddHeader(instanceSecurityGroupInboundSummaryTableHeader)
 
-	for _, inboundRule := range o.inboundRules {
+	for _, inboundRule := range o.ingressRules {
 		tViewer.AddRow(viewer.Row{
 			inboundRule.portRange,
 			inboundRule.protocol,
@@ -201,7 +201,7 @@ func renderInstanceSgSummaryOutbound(outputChan chan<- *viewer.TableViewer, o *i
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("SG/Outbound")
 	tViewer.AddHeader(instanceSecurityGroupOutboundSummaryTableHeader)
-	for _, outboundRule := range o.outboundRules {
+	for _, outboundRule := range o.egressRules {
 		tViewer.AddRow(viewer.Row{
 			outboundRule.portRange,
 			outboundRule.protocol,

@@ -48,6 +48,9 @@ func (t *TableViewer) SetTitle(title string) *TableViewer {
 	return t
 }
 
+func (t *TableViewer) IsErrorView() bool {
+	return false
+}
 func (t *TableViewer) View() {
 	writer := table.NewWriter()
 	writer.SetTitle(t.title)
@@ -62,6 +65,10 @@ func (t *TableViewer) View() {
 func (t *CompoundTableViewer) AddTableViewer(tViewer *TableViewer) *CompoundTableViewer {
 	t.viewers = append(t.viewers, tViewer)
 	return t
+}
+
+func (t *CompoundTableViewer) IsErrorView() bool {
+	return false
 }
 
 func (t *CompoundTableViewer) View() {

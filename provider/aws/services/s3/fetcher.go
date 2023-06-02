@@ -3,6 +3,7 @@ package s3
 import (
 	"cloudctl/provider/aws"
 	itime "cloudctl/time"
+	"cloudctl/viewer"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,18 +54,16 @@ func (f bucketListFetcher) Fetch() interface{} {
 
 	apiOutput, err := f.client.S3.ListBuckets(&s3.ListBucketsInput{})
 	if err != nil {
-		return &bucketListOutput{err: &aws.APIException{}}
+		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
+		return &bucketListOutput{err: errorInfo}
 	}
 	if len(apiOutput.Buckets) == 0 {
-		return &bucketListOutput{err: NoBucketFound{}}
+		return &bucketListOutput{err: &aws.ErrorInfo{Err: NoBucketFound(), ErrorType: viewer.INFO}}
 	}
-	buckets := []*bucket{}
+	buckets := []*bucketOutput{}
 	for _, o := range apiOutput.Buckets {
 		if f.filter.Apply(o) {
-			buckets = append(buckets, &bucket{
-				name:         o.Name,
-				creationDate: f.tz.AdaptTimezone(o.CreationDate),
-			})
+			buckets = append(buckets, newBucketOutput(o, f.tz))
 		}
 	}
 	// default sort(asc) by creation darte
@@ -75,20 +74,16 @@ func (f bucketListFetcher) Fetch() interface{} {
 }
 
 func (f bucketObjectsFetcher) Fetch() interface{} {
-	output := []*object{}
+	output := []*bucketObjectOutput{}
 
 	objectsPtr, err := fetchBucketObjects(f.bucketName, f.objectPrefix, f.client)
 	if err != nil {
-		return &bucketObjectListOutput{err: &aws.APIException{}} // TODO : handle specific error
+		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
+		return &bucketObjectListOutput{err: errorInfo}
 	}
 
 	for _, o := range *objectsPtr {
-		output = append(output, &object{
-			key:          o.Key,
-			sizeInBytes:  o.Size,
-			storageClass: o.StorageClass,
-			lastModified: f.tz.AdaptTimezone(o.LastModified),
-		})
+		output = append(output, newBucketObjectOutput(o, f.tz))
 	}
 	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output, err: nil}
 }
@@ -118,7 +113,7 @@ func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
 		input.Prefix = &f.key
 		listBucketObjects, err := f.client.S3.ListObjects(input)
 		if err != nil {
-			return &bucketOjectsDownloadSummary{err: &aws.APIException{}} // TODO : handle specific error
+			return &bucketOjectsDownloadSummary{err: aws.AWSError(err)}
 		}
 
 		for _, object := range listBucketObjects.Contents {
@@ -136,9 +131,9 @@ func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
 
 func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[]*s3.Object, error) {
 
-	var recursiveFetch func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarket string, client *aws.Client) error
+	var fetch func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarket string, client *aws.Client) error
 
-	recursiveFetch = func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarker string, client *aws.Client) error {
+	fetch = func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarker string, client *aws.Client) error {
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &bucketName
 		input.Prefix = &objectPrefix
@@ -153,12 +148,13 @@ func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[
 		*objectsPtr = append(*objectsPtr, apiOutput.Contents...)
 		if *apiOutput.IsTruncated {
 			nextMarker = *apiOutput.Contents[len(apiOutput.Contents)-1].Key
-			recursiveFetch(bucketName, objectPrefix, objectsPtr, nextMarker, client)
+			fetch(bucketName, objectPrefix, objectsPtr, nextMarker, client)
 		}
 		return nil
 	}
 	objects := []*s3.Object{}
-	recursiveFetch(bucketName, objectPrefix, &objects, "", client)
+	nextMarker := "" // empty marker
+	fetch(bucketName, objectPrefix, &objects, nextMarker, client)
 	return &objects, nil
 }
 
@@ -176,8 +172,8 @@ func downloadObject(bucketName, key, path string, client *aws.Client, downloadSu
 	}
 
 	file, err := os.Create(downloadFileAbsPath)
-	defer file.Close()
 	if err != nil {
+		defer file.Close()
 		downloadSummaryChan <- &objectDownloadSummary{err: err}
 	} else {
 		numBytesWrite, err := client.S3Downloader.Download(file, &s3.GetObjectInput{

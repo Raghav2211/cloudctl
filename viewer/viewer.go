@@ -3,6 +3,7 @@ package viewer
 type ViewerFunc func(o interface{}) Viewer
 
 type Viewer interface {
+	IsErrorView() bool
 	View()
 }
 

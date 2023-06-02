@@ -1,8 +1,12 @@
 package s3
 
 import (
+	"cloudctl/provider/aws"
+	ctltime "cloudctl/time"
 	"fmt"
 	"time"
+
+	"github.com/aws/aws-sdk-go/service/s3"
 )
 
 type bucketOjectsDownloadSummary struct {
@@ -19,25 +23,25 @@ type objectDownloadSummary struct {
 	err         error
 }
 
-type bucket struct {
+type bucketOutput struct {
 	name         *string
 	creationDate *time.Time
 }
-type object struct {
+type bucketObjectOutput struct {
 	key          *string
 	sizeInBytes  *int64
 	storageClass *string
 	lastModified *time.Time
 }
 type bucketListOutput struct {
-	buckets []*bucket
-	err     error
+	buckets []*bucketOutput
+	err     *aws.ErrorInfo
 }
 
 type bucketObjectListOutput struct {
 	bucketName *string
-	objects    []*object
-	err        error
+	objects    []*bucketObjectOutput
+	err        *aws.ErrorInfo
 }
 
 type bucketDefinition struct {
@@ -52,6 +56,22 @@ type bucketDefinition struct {
 	encryptionConfigAPIError error
 	lifecycle                *interface{}
 	lifeCycleAPIError        error
+}
+
+func newBucketOutput(bucket *s3.Bucket, tz *ctltime.Timezone) *bucketOutput {
+	return &bucketOutput{
+		name:         bucket.Name,
+		creationDate: tz.AdaptTimezone(bucket.CreationDate),
+	}
+}
+
+func newBucketObjectOutput(o *s3.Object, tz *ctltime.Timezone) *bucketObjectOutput {
+	return &bucketObjectOutput{
+		key:          o.Key,
+		sizeInBytes:  o.Size,
+		storageClass: o.StorageClass,
+		lastModified: tz.AdaptTimezone(o.LastModified),
+	}
 }
 
 func (o *bucketDefinition) SetBucketName(bucketName string) *bucketDefinition {

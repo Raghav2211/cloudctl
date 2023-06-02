@@ -1,9 +1,7 @@
 package s3
 
-type NoBucketFound struct {
-	error
-}
+import "fmt"
 
-func (err NoBucketFound) Error() string {
-	return "No bucket found"
+func NoBucketFound() error {
+	return fmt.Errorf("no bucket found")
 }

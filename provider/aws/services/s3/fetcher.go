@@ -58,7 +58,8 @@ func (f bucketListFetcher) Fetch() interface{} {
 		return &bucketListOutput{err: errorInfo}
 	}
 	if len(apiOutput.Buckets) == 0 {
-		return &bucketListOutput{err: &aws.ErrorInfo{Err: NoBucketFound(), ErrorType: viewer.INFO}}
+		errorInfo := &aws.ErrorInfo{Err: NoBucketFound(), ErrorType: viewer.INFO}
+		return &bucketListOutput{err: errorInfo}
 	}
 	buckets := []*bucketOutput{}
 	for _, o := range apiOutput.Buckets {
@@ -70,22 +71,26 @@ func (f bucketListFetcher) Fetch() interface{} {
 	sort.Slice(buckets, func(i, j int) bool {
 		return buckets[i].creationDate.Before(*buckets[j].creationDate)
 	})
-	return &bucketListOutput{buckets: buckets, err: nil}
+	return &bucketListOutput{buckets: buckets}
 }
 
 func (f bucketObjectsFetcher) Fetch() interface{} {
 	output := []*bucketObjectOutput{}
 
 	objectsPtr, err := fetchBucketObjects(f.bucketName, f.objectPrefix, f.client)
-	if err != nil {
-		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
-		return &bucketObjectListOutput{err: errorInfo}
-	}
 
 	for _, o := range *objectsPtr {
 		output = append(output, newBucketObjectOutput(o, f.tz))
 	}
-	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output, err: nil}
+	if err != nil {
+		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
+		return &bucketObjectListOutput{err: errorInfo}
+	}
+	if len(output) == 0 {
+		errorInfo := aws.NewErrorInfo(NoObjectFound(f.bucketName), viewer.INFO, nil)
+		return &bucketObjectListOutput{err: errorInfo}
+	}
+	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output}
 }
 
 func (f bucketConfigurationFetcher) Fetch() interface{} {
@@ -104,29 +109,32 @@ func (f bucketConfigurationFetcher) Fetch() interface{} {
 }
 
 func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
-	downloadSummaryChan := make(chan *objectDownloadSummary)
-	downloadSummaries := []*objectDownloadSummary{}
-	defer close(downloadSummaryChan)
+	objectDownloadSummaryChan := make(chan *objectDownloadSummary)
+	objectsDownloadSummary := []*objectDownloadSummary{}
+	defer close(objectDownloadSummaryChan)
 	if f.recursive {
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &f.bucketName
 		input.Prefix = &f.key
-		listBucketObjects, err := f.client.S3.ListObjects(input)
+		apiOutput, err := f.client.S3.ListObjects(input)
 		if err != nil {
-			return &bucketOjectsDownloadSummary{err: aws.AWSError(err)}
+			return &bucketOjectsDownloadSummary{err: aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)}
+		}
+		if len(apiOutput.Contents) == 0 {
+			return &bucketOjectsDownloadSummary{err: aws.NewErrorInfo(NoObjectFoundWithGivenPrefix(f.bucketName, f.key), viewer.WARN, nil)}
 		}
 
-		for _, object := range listBucketObjects.Contents {
-			go downloadObject(f.bucketName, *object.Key, f.path, f.client, downloadSummaryChan)
+		for _, object := range apiOutput.Contents {
+			go downloadObject(f.bucketName, *object.Key, f.path, f.client, objectDownloadSummaryChan)
 		}
-		for i := 0; i < len(listBucketObjects.Contents); i++ {
-			downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
+		for i := 0; i < len(apiOutput.Contents); i++ {
+			objectsDownloadSummary = append(objectsDownloadSummary, <-objectDownloadSummaryChan)
 		}
-		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, downloadSummaries: downloadSummaries, err: nil}
+		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary, err: nil}
 	}
-	go downloadObject(f.bucketName, f.key, f.path, f.client, downloadSummaryChan)
-	downloadSummaries = append(downloadSummaries, <-downloadSummaryChan)
-	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, downloadSummaries: downloadSummaries, err: nil}
+	go downloadObject(f.bucketName, f.key, f.path, f.client, objectDownloadSummaryChan)
+	objectsDownloadSummary = append(objectsDownloadSummary, <-objectDownloadSummaryChan)
+	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary, err: nil}
 }
 
 func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[]*s3.Object, error) {
@@ -154,8 +162,8 @@ func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[
 	}
 	objects := []*s3.Object{}
 	nextMarker := "" // empty marker
-	fetch(bucketName, objectPrefix, &objects, nextMarker, client)
-	return &objects, nil
+	err := fetch(bucketName, objectPrefix, &objects, nextMarker, client)
+	return &objects, err
 }
 
 func downloadObject(bucketName, key, path string, client *aws.Client, downloadSummaryChan chan<- *objectDownloadSummary) {
@@ -174,22 +182,16 @@ func downloadObject(bucketName, key, path string, client *aws.Client, downloadSu
 	file, err := os.Create(downloadFileAbsPath)
 	if err != nil {
 		defer file.Close()
-		downloadSummaryChan <- &objectDownloadSummary{err: err}
+		downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(err, viewer.ERROR, nil))
 	} else {
 		numBytesWrite, err := client.S3Downloader.Download(file, &s3.GetObjectInput{
 			Bucket: &bucketName,
 			Key:    &key,
 		})
 		if err != nil {
-			downloadSummaryChan <- &objectDownloadSummary{err: err}
+			downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil))
 		} else {
-			downloadSummaryChan <- &objectDownloadSummary{
-				source:      key,
-				destination: file.Name(),
-				sizeinBytes: numBytesWrite,
-				timeElapsed: time.Since(start),
-			}
-
+			downloadSummaryChan <- newBucketObjectDownloadSummary(key, file.Name(), numBytesWrite, time.Since(start), nil)
 		}
 	}
 }

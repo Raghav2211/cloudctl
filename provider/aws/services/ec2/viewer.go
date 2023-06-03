@@ -99,7 +99,7 @@ func instanceListViewer(o interface{}) viewer.Viewer {
 }
 
 func instanceInfoViewer(o interface{}) viewer.Viewer {
-	cTviewer := viewer.NewCompoundTableViewer()
+	cTviewer := viewer.NewCompoundViewer()
 
 	iSummaryTviewerChan := make(chan *viewer.TableViewer)
 	iDetailsTviewerChan := make(chan *viewer.TableViewer)

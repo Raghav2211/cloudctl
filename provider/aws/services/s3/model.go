@@ -10,9 +10,9 @@ import (
 )
 
 type bucketOjectsDownloadSummary struct {
-	bucketName        string
-	downloadSummaries []*objectDownloadSummary
-	err               error
+	bucketName             string
+	objectsDownloadSummary []*objectDownloadSummary
+	err                    *aws.ErrorInfo
 }
 
 type objectDownloadSummary struct {
@@ -20,7 +20,7 @@ type objectDownloadSummary struct {
 	destination string
 	sizeinBytes int64
 	timeElapsed time.Duration
-	err         error
+	err         *aws.ErrorInfo
 }
 
 type bucketOutput struct {
@@ -71,6 +71,16 @@ func newBucketObjectOutput(o *s3.Object, tz *ctltime.Timezone) *bucketObjectOutp
 		sizeInBytes:  o.Size,
 		storageClass: o.StorageClass,
 		lastModified: tz.AdaptTimezone(o.LastModified),
+	}
+}
+
+func newBucketObjectDownloadSummary(key, fileName string, numBytesWrite int64, timeElapsed time.Duration, err *aws.ErrorInfo) *objectDownloadSummary {
+	return &objectDownloadSummary{
+		source:      key,
+		destination: fileName,
+		sizeinBytes: numBytesWrite,
+		timeElapsed: timeElapsed,
+		err:         err,
 	}
 }
 

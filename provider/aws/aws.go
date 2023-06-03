@@ -17,6 +17,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 )
 
+const (
+	DEFAULT_REGION = "eu-west-1"
+)
+
 var (
 	env_profile = []string{"AWS_DEFAULT_PROFILE", "AWS_PROFILE"}
 	env_region  = []string{"AWS_DEFAULT_REGION", "AWS_REGION"}
@@ -53,7 +57,10 @@ func newSession(profile, region string, debug bool) (sess *session.Session, err 
 	r := getEnv(region, env_region)
 
 	if len(r) == 0 {
-		prompt := &survey.Input{Message: "Enter region?"}
+		prompt := &survey.Input{
+			Message: "Enter region?",
+			Default: DEFAULT_REGION, // default region if not entered
+		}
 		survey.AskOne(prompt, &r, survey.WithValidator(survey.Required))
 	}
 
@@ -87,7 +94,6 @@ func newCred(profile *string) (cred *credentials.Credentials) {
 		}
 		var prompt = &survey.Select{
 			Message: "Choose a Profile:",
-			Default: profiles[0],
 			Options: profiles,
 		}
 		err := survey.AskOne(prompt, profile, survey.WithValidator(survey.Required))

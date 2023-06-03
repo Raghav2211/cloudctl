@@ -25,5 +25,5 @@ func AWSError(err error) error {
 	if awserr, ok := err.(awserr.Error); ok {
 		return fmt.Errorf("[code:%s , message:%s] ", awserr.Code(), awserr.Message())
 	}
-	return fmt.Errorf("somethig wrong, Need to find out what :) | actual err %w", err)
+	return fmt.Errorf("somethig wrong, need to find out what | actual err %w", err)
 }

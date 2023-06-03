@@ -14,17 +14,11 @@ const (
 
 type ErrorViewer struct {
 	message   string
-	meta      interface{}
 	errorType ErrorType
 }
 
 func (e *ErrorViewer) SetErrorMessage(message string) *ErrorViewer {
 	e.message = message
-	return e
-}
-
-func (e *ErrorViewer) SetErrorMeta(meta interface{}) *ErrorViewer {
-	e.meta = meta
 	return e
 }
 
@@ -38,6 +32,13 @@ func (t *ErrorViewer) IsErrorView() bool {
 }
 func (e *ErrorViewer) View() {
 	black := color.New(color.Attribute(e.errorType))
-	boldBlack := black.Add(color.Bold)
-	boldBlack.Println("Error found: ", e.message, " meta: ", e.meta)
+	boldColor := black.Add(color.Bold)
+	if e.errorType == WARN {
+		boldColor.Println("WARNING!")
+	} else if e.errorType == ERROR {
+		boldColor.Println("ERROR!")
+	} else {
+		boldColor.Println("INFO!")
+	}
+	boldColor.Println(e.message)
 }

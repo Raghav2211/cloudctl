@@ -6,6 +6,7 @@ import (
 )
 
 type eC2ListCmd struct {
+	InstanceType []string `name:"type" help:"Return instance list of specific type | values [running,stopped,terminated,shutting-down,all]" default:"all"`
 }
 
 type instanceDefinitionCmd struct {
@@ -18,7 +19,7 @@ type EC2Command struct {
 }
 
 func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
-	icmd := rawsec2.NewinstanceListCommandExecutor(globals)
+	icmd := rawsec2.NewinstanceListCommandExecutor(globals, cmd.InstanceType)
 	err := icmd.Execute()
 	if err != nil {
 		return err

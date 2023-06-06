@@ -2,6 +2,7 @@ package ec2
 
 import (
 	"cloudctl/provider/aws"
+	ctltime "cloudctl/time"
 	"fmt"
 	"strings"
 	"time"
@@ -9,15 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
-type instance struct {
-	id         *string
-	typee      *string
-	state      *string
-	az         *string
-	publicIp   *string
-	privateIp  *string
-	launchTime *time.Time
-}
+const (
+	NO_VALUE string = "-"
+)
 
 type ingressRule struct {
 	portRange string
@@ -47,21 +42,18 @@ type instanceDetail struct {
 	launchTime time.Time
 }
 type instanceSummary struct {
-	id string
-
-	publicIp    string
-	publicIpDNS string
-
-	privateIp    string
-	privateIpDNS string
-
-	state string
-	typee string
-
-	vpcId    string
-	subnetId string
-
-	iamroleArn string
+	id           *string
+	publicIp     *string
+	publicIpDNS  *string
+	az           *string
+	privateIp    *string
+	privateIpDNS *string
+	state        *string
+	typee        *string
+	vpcId        *string
+	subnetId     *string
+	iamroleArn   *string
+	launchTime   *time.Time
 }
 
 type volumeAttachment struct {
@@ -106,41 +98,72 @@ type instanceDefinition struct {
 }
 
 type instanceListOutput struct {
-	instances []*instance
-	err       *aws.ErrorInfo
+	instancesByState map[string][]*instanceSummary
+	err              *aws.ErrorInfo
 }
 
-func NewInstanceOutput(o *ec2.Instance) *instance {
-	privateIp := getPrivateIp(o)
-	publicIp := getPublicIp(o)
-	return &instance{
-		id:         o.InstanceId,
-		typee:      o.InstanceType,
-		state:      o.State.Name,
-		az:         o.Placement.AvailabilityZone,
-		publicIp:   &publicIp,
-		privateIp:  &privateIp,
-		launchTime: o.LaunchTime,
+func (summary *instanceSummary) setIAMProfileARN(profile *ec2.IamInstanceProfile) *instanceSummary {
+	novalue := NO_VALUE
+	summary.iamroleArn = &novalue
+	if profile != nil {
+		summary.iamroleArn = profile.Arn
 	}
+	return summary
 }
 
-func newInstanceSummary(instance *ec2.Instance) *instanceSummary {
-	iamProfileARN := "NA"
-	if instance.IamInstanceProfile != nil {
-		iamProfileARN = *instance.IamInstanceProfile.Arn
+// we can't creatre ec2 instance without VPC but termiate/shutdown instance doesn't return these details
+func (summary *instanceSummary) SetNetworkDetail(vpcId, subnetId *string) *instanceSummary {
+	novalue := NO_VALUE
+	summary.vpcId = &novalue
+	summary.subnetId = &novalue
+	if vpcId != nil {
+		summary.vpcId = vpcId
 	}
-	return &instanceSummary{
-		id:           *instance.InstanceId,
-		publicIp:     getPublicIp(instance),
-		privateIp:    getPrivateIp(instance),
-		state:        *instance.State.Name,
-		vpcId:        *instance.VpcId,
-		typee:        *instance.InstanceType,
-		iamroleArn:   iamProfileARN,
-		subnetId:     *instance.SubnetId,
-		privateIpDNS: *instance.PrivateDnsName,
-		publicIpDNS:  *instance.PublicDnsName,
+	if subnetId != nil {
+		summary.subnetId = subnetId
 	}
+
+	return summary
+}
+func (summary *instanceSummary) setPublicAddr(publicIp, publicDnsName *string) *instanceSummary {
+	novalue := NO_VALUE
+	summary.publicIp = &novalue
+	summary.publicIpDNS = &novalue
+	if publicIp != nil {
+		summary.publicIp = publicIp
+	}
+	if publicDnsName != nil {
+		summary.publicIpDNS = publicDnsName
+	}
+	return summary
+}
+
+func (summary *instanceSummary) setPrivateAddr(privateIp, privateDnsName *string) *instanceSummary {
+	novalue := NO_VALUE
+	summary.privateIp = &novalue
+	summary.privateIpDNS = &novalue
+	if privateIp != nil {
+		summary.privateIp = privateIp
+	}
+	if privateDnsName != nil {
+		summary.privateIpDNS = privateDnsName
+	}
+	return summary
+}
+
+func newInstanceSummary(instance *ec2.Instance, tz *ctltime.Timezone) *instanceSummary {
+	instanceSummary := &instanceSummary{
+		id:         instance.InstanceId,
+		az:         instance.Placement.AvailabilityZone,
+		state:      instance.State.Name,
+		typee:      instance.InstanceType,
+		launchTime: tz.AdaptTimezone(instance.LaunchTime),
+	}
+	instanceSummary.setIAMProfileARN(instance.IamInstanceProfile)
+	instanceSummary.SetNetworkDetail(instance.VpcId, instance.SubnetId)
+	instanceSummary.setPublicAddr(instance.PublicIpAddress, instance.PublicDnsName)
+	instanceSummary.setPrivateAddr(instance.PrivateIpAddress, instance.PrivateDnsName)
+	return instanceSummary
 }
 
 func newInstanceDetail(instance *ec2.Instance) *instanceDetail {

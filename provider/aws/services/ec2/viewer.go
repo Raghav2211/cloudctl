@@ -2,6 +2,7 @@ package ec2
 
 import (
 	"cloudctl/viewer"
+	"fmt"
 	"strings"
 )
 
@@ -9,10 +10,11 @@ var (
 	instanceListTableHeader = viewer.Row{
 		"Id",
 		"Type",
-		"State",
 		"Az",
 		"PublicIp",
 		"PrivateIp",
+		"vpc",
+		"subnet",
 		"LaunchAt",
 	}
 	instanceSummaryTableHeader = viewer.Row{
@@ -78,24 +80,35 @@ var (
 )
 
 func instanceListViewer(o interface{}) viewer.Viewer {
-	tViewer := viewer.NewTableViewer()
-	tViewer.AddHeader(instanceListTableHeader)
-	tViewer.SetTitle("Instances")
 	data := o.(*instanceListOutput)
-	rows := []viewer.Row{}
-	for _, instance := range data.instances {
-		rows = append(rows, viewer.Row{
-			*instance.id,
-			*instance.typee,
-			*instance.state,
-			*instance.az,
-			*instance.publicIp,
-			*instance.privateIp,
-			*instance.launchTime,
-		})
+
+	if data.err != nil {
+		erroViewer := viewer.NewErrorViewer()
+		erroViewer.SetErrorType(data.err.ErrorType)
+		erroViewer.SetErrorMessage(data.err.Err.Error())
+		return erroViewer
 	}
-	tViewer.AddRows(rows)
-	return tViewer
+	
+	compoundViewer := viewer.NewCompoundViewer()
+	for state, instanceSummaries := range data.instancesByState {
+		tViewer := viewer.NewTableViewer()
+		tViewer.AddHeader(instanceListTableHeader)
+		tViewer.SetTitle(fmt.Sprintf("Instances[%s]", state))
+		for _, instance := range instanceSummaries {
+			tViewer.AddRow(viewer.Row{
+				*instance.id,
+				*instance.typee,
+				*instance.az,
+				*instance.publicIp,
+				*instance.privateIp,
+				*instance.vpcId,
+				*instance.subnetId,
+				*instance.launchTime,
+			})
+		}
+		compoundViewer.AddTableViewer(tViewer)
+	}
+	return compoundViewer
 }
 
 func instanceInfoViewer(o interface{}) viewer.Viewer {

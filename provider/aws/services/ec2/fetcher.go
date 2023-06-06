@@ -2,6 +2,7 @@ package ec2
 
 import (
 	"cloudctl/provider/aws"
+	"cloudctl/time"
 	"cloudctl/viewer"
 	"errors"
 	"fmt"
@@ -9,33 +10,38 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
-const notApplicable string = "N/A"
-
 type instanceListFetcher struct {
 	client *aws.Client
+	tz     *time.Timezone
+	filter instanceListFilter
 }
 
 type instanceDefinitionFetcher struct {
 	client *aws.Client
+	tz     *time.Timezone
 	id     *string
 }
 
 func (f instanceListFetcher) Fetch() interface{} {
 
-	apiOutput, err := fetchInstanceList(f.client)
-	instances := []*instance{}
+	apiOutput, err := fetchInstanceList(f.client, f.filter)
+	instancesByState := make(map[string][]*instanceSummary)
+	if len(*apiOutput) == 0 {
+		errorInfo := aws.NewErrorInfo(NoInstanceFound(), viewer.INFO, nil)
+		return &instanceListOutput{instancesByState: instancesByState, err: errorInfo}
+	}
 	for _, o := range *apiOutput {
-		instances = append(instances, NewInstanceOutput(o))
+		instancesByState[*o.State.Name] = append(instancesByState[*o.State.Name], newInstanceSummary(o, f.tz))
 	}
 	if err != nil {
 		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
-		return &instanceListOutput{instances: instances, err: errorInfo}
+		return &instanceListOutput{instancesByState: instancesByState, err: errorInfo}
 	}
-	return &instanceListOutput{instances: instances, err: nil}
+	return &instanceListOutput{instancesByState: instancesByState, err: nil}
 }
 
 func (f instanceDefinitionFetcher) Fetch() interface{} {
-	definition, err := fetchInstanceDefinition(f.id, f.client)
+	definition, err := fetchInstanceDefinition(f.id, f.tz, f.client)
 	if err != nil {
 		return &instanceDefinition{err: err} // TODO : handle specific error
 	}
@@ -43,7 +49,7 @@ func (f instanceDefinitionFetcher) Fetch() interface{} {
 	return definition
 }
 
-func fetchInstanceDefinition(instanceId *string, client *aws.Client) (*instanceDefinition, error) {
+func fetchInstanceDefinition(instanceId *string, tz *time.Timezone, client *aws.Client) (*instanceDefinition, error) {
 
 	volumeOutputChan := make(chan []*instanceVolume)
 	sgOutputChan := make(chan *instanceSGSummary)
@@ -78,19 +84,22 @@ func fetchInstanceDefinition(instanceId *string, client *aws.Client) (*instanceD
 		}()
 	}
 	return &instanceDefinition{
-		summary:      newInstanceSummary(instance),
+		summary:      newInstanceSummary(instance, tz),
 		detail:       newInstanceDetail(instance),
 		volumes:      <-volumeOutputChan,
 		sgSummary:    <-sgOutputChan,
 		ntwrkSummary: <-eniOutputChan,
 	}, nil
 }
-func fetchInstanceList(client *aws.Client) (*[]*ec2.Instance, error) {
+func fetchInstanceList(client *aws.Client, filter instanceListFilter) (*[]*ec2.Instance, error) {
 
-	var fetch func(nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error
+	var fetch func(filter []*ec2.Filter, nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error
 
-	fetch = func(nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error {
-		result, err := client.EC2.DescribeInstances(&ec2.DescribeInstancesInput{NextToken: &nextMarker})
+	fetch = func(filter []*ec2.Filter, nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error {
+		result, err := client.EC2.DescribeInstances(&ec2.DescribeInstancesInput{
+			Filters:   filter,
+			NextToken: &nextMarker,
+		})
 		if err != nil {
 			return err
 		}
@@ -99,16 +108,17 @@ func fetchInstanceList(client *aws.Client) (*[]*ec2.Instance, error) {
 		}
 		if result.NextToken != nil {
 			nextMarker = *result.NextToken
-			if err = fetch(nextMarker, instances, client); err != nil {
+			if err = fetch(filter, nextMarker, instances, client); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
-
 	nextMarker := ""
 	instances := []*ec2.Instance{}
-	err := fetch(nextMarker, &instances, client)
+	apiFilter := []*ec2.Filter{}
+	apiFilter = append(apiFilter, filter.getInstanceTypeFilter())
+	err := fetch(apiFilter, nextMarker, &instances, client)
 	return &instances, err
 }
 func fetchInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Reservation {
@@ -200,20 +210,4 @@ func fetchNetworkSummary(outputChan chan<- []*instanceNetworkinterface, enis []*
 		networkinterfaces = append(networkinterfaces, networkInterface)
 	}
 	outputChan <- networkinterfaces
-}
-
-func getPrivateIp(instance *ec2.Instance) (privateIp string) {
-	privateIp = notApplicable
-	if instance.PrivateIpAddress != nil {
-		privateIp = *instance.PrivateIpAddress
-	}
-	return
-}
-
-func getPublicIp(instance *ec2.Instance) (publicIp string) {
-	publicIp = notApplicable
-	if instance.PublicIpAddress != nil {
-		publicIp = *instance.PublicIpAddress
-	}
-	return
 }

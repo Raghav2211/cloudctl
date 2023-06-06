@@ -15,14 +15,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-var bucketInfoRetrieverFuncs = []func(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup){
-	getBucketPolicy,
-	getBucketVersionConfig,
-	getBucketTags,
-	getBucketencryptionConfig,
-	getBucketLifecycleConfig,
-}
-
 type bucketListFetcher struct {
 	client *aws.Client
 	filter *bucketListFilter
@@ -99,11 +91,43 @@ func (f bucketConfigurationFetcher) Fetch() interface{} {
 	definition.SetBucketName(f.bucketName)
 
 	wg := new(sync.WaitGroup)
-	wg.Add(len(bucketInfoRetrieverFuncs))
+	wg.Add(5)
 
-	for _, function := range bucketInfoRetrieverFuncs {
-		go function(&f.bucketName, f.client, definition, wg)
-	}
+	go func() {
+		defer wg.Done()
+		data := getBucketPolicy(&f.bucketName, f.client, definition)
+		if data != nil {
+			definition.SetPolicy(data)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		data := getBucketVersionConfig(&f.bucketName, f.client, definition)
+		if data != nil {
+			definition.SetVersion(data)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		data := getBucketTags(&f.bucketName, f.client, definition)
+		if data != nil {
+			definition.SetTags(data)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		data := getBucketencryptionConfig(&f.bucketName, f.client, definition)
+		if data != nil {
+			definition.SetEncryptionConfig(data)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		data := getBucketLifecycleConfig(&f.bucketName, f.client, definition)
+		if data != nil {
+			definition.SetLifeCycle(data)
+		}
+	}()
 	wg.Wait()
 	return definition
 }
@@ -196,56 +220,51 @@ func downloadObject(bucketName, key, path string, client *aws.Client, downloadSu
 	}
 }
 
-func getBucketPolicy(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
-	defer wg.Done()
+func getBucketPolicy(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketPolicyOutput {
 	res, err := client.S3.GetBucketPolicy(&s3.GetBucketPolicyInput{Bucket: bucket})
 	if err != nil {
 		errr, _ := err.(awserr.Error)
 		fmt.Println("errCode", errr.Code(), " message ", errr.Message())
 		bucketinfo.SetPolicyAPIError(err)
-		return
+		return nil
 	}
-	bucketinfo.SetPolicy(res)
+	return res
 }
 
-func getBucketVersionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
-	defer wg.Done()
+func getBucketVersionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketVersioningOutput {
 	res, err := client.S3.GetBucketVersioning(&s3.GetBucketVersioningInput{Bucket: bucket})
 	if err != nil {
 		bucketinfo.SetVersionAPIError(err)
-		return
+		return nil
 	}
-	bucketinfo.SetVersion(res)
+	return res
 }
 
-func getBucketTags(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
-	defer wg.Done()
+func getBucketTags(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketTaggingOutput {
 	res, err := client.S3.GetBucketTagging(&s3.GetBucketTaggingInput{Bucket: bucket})
 	if err != nil {
 		bucketinfo.SetTagsAPIError(err)
-		return
+		return nil
 	}
-	bucketinfo.SetTags(res)
+	return res
 }
 
-func getBucketencryptionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
-	defer wg.Done()
+func getBucketencryptionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketEncryptionOutput {
 	res, err := client.S3.GetBucketEncryption(&s3.GetBucketEncryptionInput{Bucket: bucket})
 	if err != nil {
 		bucketinfo.SetEncryptionConfigAPIError(err)
-		return
+		return nil
 	}
-	bucketinfo.SetEncryptionConfig(res)
+	return res
 }
 
-func getBucketLifecycleConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition, wg *sync.WaitGroup) {
-	defer wg.Done()
+func getBucketLifecycleConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketLifecycleConfigurationOutput {
 	res, err := client.S3.GetBucketLifecycleConfiguration(&s3.GetBucketLifecycleConfigurationInput{Bucket: bucket})
 
 	if err != nil {
 		fmt.Println("Error message", err.Error())
 		bucketinfo.SetLifeCycleError(err)
-		return
+		return nil
 	}
-	bucketinfo.SetLifeCycle(res)
+	return res
 }

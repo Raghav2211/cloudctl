@@ -15,7 +15,7 @@ func (v *CompoundViewer) AddTableViewer(tViewer *TableViewer) *CompoundViewer {
 	return v
 }
 func (v *CompoundViewer) IsErrorView() bool {
-	return len(v.errViewers) == 0
+	return len(v.errViewers) == 0 && len(v.tViewers) == 0
 }
 
 func (v *CompoundViewer) View() {

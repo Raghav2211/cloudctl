@@ -15,18 +15,18 @@ const (
 )
 
 type ingressRule struct {
-	portRange string
-	protocol  string
-	source    string
-	sgId      string
-	desc      string
+	portRange *string
+	protocol  *string
+	source    *string
+	sgId      *string
+	desc      *string
 }
 type egressRule struct {
-	portRange string
-	protocol  string
-	source    string
-	sgId      string
-	desc      string
+	portRange *string
+	protocol  *string
+	source    *string
+	sgId      *string
+	desc      *string
 }
 type instanceSGSummary struct {
 	groupIds     []*string
@@ -35,11 +35,11 @@ type instanceSGSummary struct {
 }
 
 type instanceDetail struct {
-	platform   string
-	amiId      string
-	monitor    string
-	osdetails  string
-	launchTime time.Time
+	platform   *string
+	amiId      *string
+	monitor    *string
+	osdetails  *string
+	launchTime *time.Time
 }
 type instanceSummary struct {
 	id           *string
@@ -57,44 +57,44 @@ type instanceSummary struct {
 }
 
 type volumeAttachment struct {
-	id                  string
-	time                time.Time
-	deleteOnTermination bool
-	device              string
-	state               string
+	id                  *string
+	time                *time.Time
+	deleteOnTermination *bool
+	device              *string
+	state               *string
 }
 
 type instanceVolume struct {
-	creationTime time.Time
-	size         int64
-	isEncrypt    bool
-	kmsKey       string
-	state        string
+	creationTime *time.Time
+	size         *int64
+	isEncrypt    *bool
+	kmsKey       *string
+	state        *string
 	attachments  []*volumeAttachment
 }
 
 type instanceNetworkinterface struct {
-	id                  string
-	description         string
-	privateIpv4Add      string
-	privateIpv4DNS      string
-	publicIpv4Add       string
-	publicIpv4DNS       string
-	attachTime          time.Time
-	attachStatus        string
-	vpcId               string
-	subnetId            string
-	deleteOnTermination bool
-	securityGroups      []*string
+	id                  *string
+	description         *string
+	privateIpv4Add      *string
+	privateIpv4DNS      *string
+	publicIpv4Add       *string
+	publicIpv4DNS       *string
+	attachTime          *time.Time
+	attachStatus        *string
+	vpcId               *string
+	subnetId            *string
+	deleteOnTermination *bool
+	securityGroups      *[]*string
 }
 
 type instanceDefinition struct {
-	summary      *instanceSummary
-	detail       *instanceDetail
-	volumes      []*instanceVolume
-	sgSummary    *instanceSGSummary
-	ntwrkSummary []*instanceNetworkinterface
-	err          error
+	summary           *instanceSummary
+	detail            *instanceDetail
+	volumes           []*instanceVolume
+	sgSummary         *instanceSGSummary
+	networkInterfaces []*instanceNetworkinterface
+	err               error
 }
 
 type instanceListOutput struct {
@@ -167,16 +167,20 @@ func newInstanceSummary(instance *ec2.Instance, tz *ctltime.Timezone) *instanceS
 }
 
 func newInstanceDetail(instance *ec2.Instance) *instanceDetail {
+	platform := NO_VALUE
+	if instance.Platform != nil {
+		platform = *instance.Platform
+	}
 	return &instanceDetail{
-		platform:   "N/A", // TODO handle platforrm if nil
-		amiId:      *instance.ImageId,
-		monitor:    *instance.Monitoring.State,
-		osdetails:  *instance.PlatformDetails,
-		launchTime: *instance.LaunchTime,
+		platform:   &platform,
+		amiId:      instance.ImageId,
+		monitor:    instance.Monitoring.State,
+		osdetails:  instance.PlatformDetails,
+		launchTime: instance.LaunchTime,
 	}
 }
 
-func NewInstanceVolume(volume *ec2.Volume) *instanceVolume {
+func newInstanceVolume(volume *ec2.Volume) *instanceVolume {
 	attachments := []*volumeAttachment{}
 	kmsKey := "N/A"
 	if volume.KmsKeyId != nil {
@@ -187,14 +191,14 @@ func NewInstanceVolume(volume *ec2.Volume) *instanceVolume {
 	}
 	return &instanceVolume{
 		attachments:  attachments,
-		creationTime: *volume.CreateTime,
-		size:         *volume.Size,
-		isEncrypt:    *volume.Encrypted,
-		kmsKey:       kmsKey,
-		state:        *volume.State,
+		creationTime: volume.CreateTime,
+		size:         volume.Size,
+		isEncrypt:    volume.Encrypted,
+		kmsKey:       &kmsKey,
+		state:        volume.State,
 	}
 }
-func NewSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDescription string, ingressPermissions []*ec2.IpPermission) (ingressRules []*ingressRule) {
+func newSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDescription string, ingressPermissions []*ec2.IpPermission) (ingressRules []*ingressRule) {
 	ingressRules = []*ingressRule{}
 	sgIdWithName := fmt.Sprintf("%s(%s)", securityGroupId, securityGroupName)
 	portRange := "ALL" //  if IpProtocol is -1
@@ -213,11 +217,11 @@ func NewSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDe
 				description = &securityGroupDescription
 			}
 			ingressRules = append(ingressRules, &ingressRule{
-				portRange: portRange,
-				protocol:  protocol,
-				source:    *userIdGroupPair.GroupId,
-				sgId:      sgIdWithName,
-				desc:      *description,
+				portRange: &portRange,
+				protocol:  &protocol,
+				source:    userIdGroupPair.GroupId,
+				sgId:      &sgIdWithName,
+				desc:      description,
 			})
 		}
 
@@ -227,11 +231,11 @@ func NewSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDe
 				description = &securityGroupDescription
 			}
 			ingressRules = append(ingressRules, &ingressRule{
-				portRange: portRange,
-				protocol:  protocol,
-				source:    *ipRange.CidrIp,
-				sgId:      sgIdWithName,
-				desc:      *description,
+				portRange: &portRange,
+				protocol:  &protocol,
+				source:    ipRange.CidrIp,
+				sgId:      &sgIdWithName,
+				desc:      description,
 			})
 		}
 
@@ -241,18 +245,18 @@ func NewSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDe
 				description = &securityGroupDescription
 			}
 			ingressRules = append(ingressRules, &ingressRule{
-				portRange: portRange,
-				protocol:  protocol,
-				source:    *ipRange.CidrIpv6,
-				sgId:      sgIdWithName,
-				desc:      *description,
+				portRange: &portRange,
+				protocol:  &protocol,
+				source:    ipRange.CidrIpv6,
+				sgId:      &sgIdWithName,
+				desc:      description,
 			})
 		}
 	}
 	return
 }
 
-func NewSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDescription string, egressPermissions []*ec2.IpPermission) (egressRules []*egressRule) {
+func newSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDescription string, egressPermissions []*ec2.IpPermission) (egressRules []*egressRule) {
 	egressRules = []*egressRule{}
 	sgIdWithName := fmt.Sprintf("%s(%s)", securityGroupId, securityGroupName)
 	for _, rule := range egressPermissions {
@@ -272,11 +276,11 @@ func NewSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDes
 				description = &securityGroupDescription
 			}
 			egressRules = append(egressRules, &egressRule{
-				portRange: portRange,
-				protocol:  protocol,
-				source:    *ipRange.CidrIp,
-				sgId:      sgIdWithName,
-				desc:      *description,
+				portRange: &portRange,
+				protocol:  &protocol,
+				source:    ipRange.CidrIp,
+				sgId:      &sgIdWithName,
+				desc:      description,
 			})
 		}
 
@@ -286,11 +290,11 @@ func NewSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDes
 				description = &securityGroupDescription
 			}
 			egressRules = append(egressRules, &egressRule{
-				portRange: portRange,
-				protocol:  protocol,
-				source:    *ipRange.CidrIpv6,
-				sgId:      sgIdWithName,
-				desc:      *description,
+				portRange: &portRange,
+				protocol:  &protocol,
+				source:    ipRange.CidrIpv6,
+				sgId:      &sgIdWithName,
+				desc:      description,
 			})
 		}
 	}
@@ -298,10 +302,74 @@ func NewSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDes
 }
 func newVolumeAttachment(attachment *ec2.VolumeAttachment) *volumeAttachment {
 	return &volumeAttachment{
-		id:                  *attachment.VolumeId,
-		time:                *attachment.AttachTime,
-		deleteOnTermination: *attachment.DeleteOnTermination,
-		device:              *attachment.Device,
-		state:               *attachment.State,
+		id:                  attachment.VolumeId,
+		time:                attachment.AttachTime,
+		deleteOnTermination: attachment.DeleteOnTermination,
+		device:              attachment.Device,
+		state:               attachment.State,
 	}
+}
+
+func newInstanceNetworkSummary(eni *ec2.InstanceNetworkInterface) *instanceNetworkinterface {
+	publicIpV4Address := NO_VALUE
+	publicIpV4DNS := NO_VALUE
+	privateIpV4Address := NO_VALUE
+	privateIpV4DNS := NO_VALUE
+	if eni.Association != nil {
+		publicIpV4Address = *eni.Association.PublicIp
+		publicIpV4DNS = *eni.Association.PublicDnsName
+	}
+	if eni.PrivateDnsName != nil {
+		privateIpV4DNS = *eni.PrivateDnsName
+	}
+	if eni.PrivateIpAddress != nil {
+		privateIpV4Address = *eni.PrivateIpAddress
+	}
+	sgIdWithNames := []*string{}
+	for _, sg := range eni.Groups {
+		o := fmt.Sprintf("%s(%s)", *sg.GroupId, *sg.GroupName)
+		sgIdWithNames = append(sgIdWithNames, &o)
+	}
+	return &instanceNetworkinterface{
+		id:                  eni.NetworkInterfaceId,
+		description:         eni.Description,
+		privateIpv4Add:      &privateIpV4Address,
+		privateIpv4DNS:      &privateIpV4DNS,
+		publicIpv4Add:       &publicIpV4Address,
+		publicIpv4DNS:       &publicIpV4DNS,
+		attachTime:          eni.Attachment.AttachTime,
+		attachStatus:        eni.Status,
+		vpcId:               eni.VpcId,
+		subnetId:            eni.SubnetId,
+		deleteOnTermination: eni.Attachment.DeleteOnTermination,
+		securityGroups:      &sgIdWithNames,
+	}
+
+}
+
+func newInstanceDefinition() *instanceDefinition {
+	return &instanceDefinition{}
+}
+
+func (def *instanceDefinition) SetVolumeSummary(volumes []*instanceVolume) *instanceDefinition {
+	def.volumes = volumes
+	return def
+}
+
+func (def *instanceDefinition) SetInstanceSummary(summary *instanceSummary) *instanceDefinition {
+	def.summary = summary
+	return def
+}
+func (def *instanceDefinition) SetInstanceDetail(detail *instanceDetail) *instanceDefinition {
+	def.detail = detail
+	return def
+}
+func (def *instanceDefinition) SetSecurityGroupSummary(sgSummary *instanceSGSummary) *instanceDefinition {
+	def.sgSummary = sgSummary
+	return def
+}
+
+func (def *instanceDefinition) SetNetworkInterfaces(interfaces []*instanceNetworkinterface) *instanceDefinition {
+	def.networkInterfaces = interfaces
+	return def
 }

@@ -6,6 +6,7 @@ import (
 	"cloudctl/viewer"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
@@ -13,7 +14,7 @@ import (
 type instanceListFetcher struct {
 	client *aws.Client
 	tz     *time.Timezone
-	filter instanceListFilter
+	filter InstanceListFilter
 }
 
 type instanceDefinitionFetcher struct {
@@ -45,15 +46,14 @@ func (f instanceDefinitionFetcher) Fetch() interface{} {
 	if err != nil {
 		return &instanceDefinition{err: err} // TODO : handle specific error
 	}
-
 	return definition
 }
 
 func fetchInstanceDefinition(instanceId *string, tz *time.Timezone, client *aws.Client) (*instanceDefinition, error) {
-
-	volumeOutputChan := make(chan []*instanceVolume)
-	sgOutputChan := make(chan *instanceSGSummary)
-	eniOutputChan := make(chan []*instanceNetworkinterface)
+	instanceDefinition := newInstanceDefinition()
+	networkinterfaces := []*instanceNetworkinterface{}
+	wg := new(sync.WaitGroup)
+	wg.Add(2)
 
 	instancesChan := fetchInstacneDetail(instanceId, client)
 
@@ -65,33 +65,31 @@ func fetchInstanceDefinition(instanceId *string, tz *time.Timezone, client *aws.
 	if len(reservation.Instances) > 1 {
 		return nil, errors.New("multiple instance found how it's possible")
 	}
+
 	instance := reservation.Instances[len(reservation.Instances)-1]
+	instanceDefinition.SetInstanceSummary(newInstanceSummary(instance, tz))
+	instanceDefinition.SetInstanceDetail(newInstanceDetail(instance))
 
 	if instance.BlockDeviceMappings != nil {
 		go func() {
-			defer close(volumeOutputChan)
-			fetchInstanceVolume(volumeOutputChan, instance.BlockDeviceMappings, client)
+			defer wg.Done()
+			instanceDefinition.SetVolumeSummary(fetchInstanceVolume(instance.BlockDeviceMappings, client))
 		}()
 	}
 	if instance.NetworkInterfaces != nil {
 		go func() {
-			defer close(sgOutputChan)
-			fetchSecurityGroupsDetail(sgOutputChan, instance.NetworkInterfaces, client)
+			defer wg.Done()
+			instanceDefinition.SetSecurityGroupSummary(fetchSecurityGroupsDetail(instance.NetworkInterfaces, client))
 		}()
-		go func() {
-			defer close(eniOutputChan)
-			fetchNetworkSummary(eniOutputChan, instance.NetworkInterfaces)
-		}()
+		for _, eni := range instance.NetworkInterfaces {
+			networkinterfaces = append(networkinterfaces, newInstanceNetworkSummary(eni))
+		}
+		instanceDefinition.SetNetworkInterfaces(networkinterfaces)
 	}
-	return &instanceDefinition{
-		summary:      newInstanceSummary(instance, tz),
-		detail:       newInstanceDetail(instance),
-		volumes:      <-volumeOutputChan,
-		sgSummary:    <-sgOutputChan,
-		ntwrkSummary: <-eniOutputChan,
-	}, nil
+	wg.Wait()
+	return instanceDefinition, nil
 }
-func fetchInstanceList(client *aws.Client, filter instanceListFilter) (*[]*ec2.Instance, error) {
+func fetchInstanceList(client *aws.Client, filter InstanceListFilter) (*[]*ec2.Instance, error) {
 
 	var fetch func(filter []*ec2.Filter, nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error
 
@@ -116,8 +114,8 @@ func fetchInstanceList(client *aws.Client, filter instanceListFilter) (*[]*ec2.I
 	}
 	nextMarker := ""
 	instances := []*ec2.Instance{}
-	apiFilter := []*ec2.Filter{}
-	apiFilter = append(apiFilter, filter.getInstanceTypeFilter())
+	apiFilter := filter.requestFilters()
+	apiFilter = append(apiFilter, filter.instanceTypeFilter())
 	err := fetch(apiFilter, nextMarker, &instances, client)
 	return &instances, err
 }
@@ -135,7 +133,7 @@ func fetchInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Res
 	return instancesChan
 }
 
-func fetchInstanceVolume(volumesChan chan<- []*instanceVolume, volumemappings []*ec2.InstanceBlockDeviceMapping, client *aws.Client) {
+func fetchInstanceVolume(volumemappings []*ec2.InstanceBlockDeviceMapping, client *aws.Client) []*instanceVolume {
 	volumeIds := []*string{}
 	volumes := []*instanceVolume{}
 	for _, b := range volumemappings {
@@ -144,15 +142,15 @@ func fetchInstanceVolume(volumesChan chan<- []*instanceVolume, volumemappings []
 	data, err := client.EC2.DescribeVolumes(&ec2.DescribeVolumesInput{VolumeIds: volumeIds})
 	if err != nil {
 		fmt.Println("error occurred in getInstanceVolume", err.Error())
-		volumesChan <- volumes
+		return nil
 	}
 	for _, volume := range data.Volumes {
-		volumes = append(volumes, NewInstanceVolume(volume))
+		volumes = append(volumes, newInstanceVolume(volume))
 	}
-	volumesChan <- volumes
+	return volumes
 }
 
-func fetchSecurityGroupsDetail(outputChan chan<- *instanceSGSummary, enis []*ec2.InstanceNetworkInterface, client *aws.Client) {
+func fetchSecurityGroupsDetail(enis []*ec2.InstanceNetworkInterface, client *aws.Client) *instanceSGSummary {
 	securityGroupIds := []*string{}
 	for _, eni := range enis {
 		for _, sg := range eni.Groups {
@@ -162,52 +160,19 @@ func fetchSecurityGroupsDetail(outputChan chan<- *instanceSGSummary, enis []*ec2
 	data, err := client.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{GroupIds: securityGroupIds})
 	if err != nil {
 		fmt.Println("error occured fetchSecurityGroupsDetail ", err)
+		return nil
 	}
 	instanceSgSummary := &instanceSGSummary{groupIds: securityGroupIds}
 	ingressRules := []*ingressRule{}
 	egressRules := []*egressRule{}
 	for _, sg := range data.SecurityGroups {
-		ingressRules = append(ingressRules, NewSecurityIngressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissions)...)
-		egressRules = append(egressRules, NewSecurityEgressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissionsEgress)...)
+		ingressRules = append(ingressRules, newSecurityIngressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissions)...)
+		egressRules = append(egressRules, newSecurityEgressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissionsEgress)...)
 	}
 	// udpate ingress Rules
 	instanceSgSummary.ingressRules = ingressRules
 	// update egress Rules
 	instanceSgSummary.egressRules = egressRules
 
-	outputChan <- instanceSgSummary
-}
-
-func fetchNetworkSummary(outputChan chan<- []*instanceNetworkinterface, enis []*ec2.InstanceNetworkInterface) {
-	networkinterfaces := []*instanceNetworkinterface{}
-	for _, eni := range enis {
-
-		sgIdWithNames := []*string{}
-		for _, sg := range eni.Groups {
-			o := fmt.Sprintf("%s(%s)", *sg.GroupId, *sg.GroupName)
-			sgIdWithNames = append(sgIdWithNames, &o)
-		}
-		publicIpV4Address := "N/A"
-		publicIpV4DNS := "N/A"
-		if eni.Association != nil {
-			publicIpV4Address = *eni.Association.PublicIp
-			publicIpV4DNS = *eni.Association.PublicDnsName
-		}
-		networkInterface := &instanceNetworkinterface{
-			id:                  *eni.NetworkInterfaceId,
-			description:         *eni.Description,
-			privateIpv4Add:      *eni.PrivateIpAddress,
-			privateIpv4DNS:      *eni.PrivateDnsName,
-			publicIpv4Add:       publicIpV4Address,
-			publicIpv4DNS:       publicIpV4DNS,
-			attachTime:          *eni.Attachment.AttachTime,
-			attachStatus:        *eni.Status,
-			vpcId:               *eni.VpcId,
-			subnetId:            *eni.SubnetId,
-			deleteOnTermination: *eni.Attachment.DeleteOnTermination,
-			securityGroups:      sgIdWithNames,
-		}
-		networkinterfaces = append(networkinterfaces, networkInterface)
-	}
-	outputChan <- networkinterfaces
+	return instanceSgSummary
 }

@@ -106,7 +106,7 @@ func instanceListViewer(o interface{}) viewer.Viewer {
 				*instance.launchTime,
 			})
 		}
-		compoundViewer.AddTableViewer(tViewer)
+		compoundViewer.AddViewer(tViewer)
 	}
 	return compoundViewer
 }
@@ -116,11 +116,11 @@ func instanceInfoViewer(o interface{}) viewer.Viewer {
 
 	instance := o.(*instanceDefinition)
 
-	cTviewer.AddTableViewer(renderInstanceSummary(instance.summary))
-	cTviewer.AddTableViewer(renderInstanceDetails(instance.detail))
+	cTviewer.AddViewer(renderInstanceSummary(instance.summary))
+	cTviewer.AddViewer(renderInstanceDetails(instance.detail))
 	cTviewer.AddViewers(renderInstanceRulesSummary(instance.ruleSummary))
-	cTviewer.AddTableViewer(renderInstanceVolumeSummary(instance.volumesSummary))
-	cTviewer.AddTableViewer(renderInstanceNetworkSummary(instance.networkInterfaces))
+	cTviewer.AddViewer(renderInstanceVolumeSummary(instance.volumesSummary))
+	cTviewer.AddViewer(renderInstanceNetworkSummary(instance.networkInterfaces))
 
 	return cTviewer
 }

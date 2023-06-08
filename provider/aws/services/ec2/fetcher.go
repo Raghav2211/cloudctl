@@ -6,6 +6,7 @@ import (
 	"cloudctl/viewer"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/aws/aws-sdk-go/service/ec2"
@@ -49,46 +50,6 @@ func (f instanceDefinitionFetcher) Fetch() interface{} {
 	return definition
 }
 
-func fetchInstanceDefinition(instanceId *string, tz *time.Timezone, client *aws.Client) (*instanceDefinition, error) {
-	instanceDefinition := newInstanceDefinition()
-	networkinterfaces := []*instanceNetworkinterface{}
-	wg := new(sync.WaitGroup)
-	wg.Add(2)
-
-	instancesChan := fetchInstacneDetail(instanceId, client)
-
-	reservations := <-instancesChan
-	if len(reservations) > 1 {
-		return nil, errors.New("multiple reservation found how it's possible")
-	}
-	reservation := reservations[len(reservations)-1]
-	if len(reservation.Instances) > 1 {
-		return nil, errors.New("multiple instance found how it's possible")
-	}
-
-	instance := reservation.Instances[len(reservation.Instances)-1]
-	instanceDefinition.SetInstanceSummary(newInstanceSummary(instance, tz))
-	instanceDefinition.SetInstanceDetail(newInstanceDetail(instance))
-
-	if instance.BlockDeviceMappings != nil {
-		go func() {
-			defer wg.Done()
-			instanceDefinition.SetVolumeSummary(fetchInstanceVolume(instance.BlockDeviceMappings, client))
-		}()
-	}
-	if instance.NetworkInterfaces != nil {
-		go func() {
-			defer wg.Done()
-			instanceDefinition.SetSecurityGroupSummary(fetchSecurityGroupsDetail(instance.NetworkInterfaces, client))
-		}()
-		for _, eni := range instance.NetworkInterfaces {
-			networkinterfaces = append(networkinterfaces, newInstanceNetworkSummary(eni))
-		}
-		instanceDefinition.SetNetworkInterfaces(networkinterfaces)
-	}
-	wg.Wait()
-	return instanceDefinition, nil
-}
 func fetchInstanceList(client *aws.Client, filter InstanceListFilter) (*[]*ec2.Instance, error) {
 
 	var fetch func(filter []*ec2.Filter, nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error
@@ -119,6 +80,49 @@ func fetchInstanceList(client *aws.Client, filter InstanceListFilter) (*[]*ec2.I
 	err := fetch(apiFilter, nextMarker, &instances, client)
 	return &instances, err
 }
+
+func fetchInstanceDefinition(instanceId *string, tz *time.Timezone, client *aws.Client) (*instanceDefinition, error) {
+	instanceDefinition := newInstanceDefinition()
+	networkinterfaces := []*instanceNetworkinterface{}
+	wg := new(sync.WaitGroup)
+	wg.Add(2)
+
+	instancesChan := fetchInstacneDetail(instanceId, client)
+
+	reservations := <-instancesChan
+	if len(reservations) > 1 {
+		return nil, errors.New("multiple reservation found how it's possible")
+	}
+	reservation := reservations[len(reservations)-1]
+	if len(reservation.Instances) > 1 {
+		return nil, errors.New("multiple instance found how it's possible")
+	}
+
+	instance := reservation.Instances[len(reservation.Instances)-1]
+	instanceDefinition.SetInstanceSummary(newInstanceSummary(instance, tz))
+	instanceDefinition.SetInstanceDetail(newInstanceDetail(instance, tz))
+
+	if instance.BlockDeviceMappings != nil {
+		go func() {
+			defer wg.Done()
+			volumesSummary := fetchInstanceVolumeSummary(instance.BlockDeviceMappings, client)
+			instanceDefinition.SetVolumeSummary(volumesSummary)
+		}()
+	}
+	if instance.NetworkInterfaces != nil {
+		go func() {
+			defer wg.Done()
+			ruleSummary := fetchIngressEgressRuleSummary(instance.NetworkInterfaces, client)
+			instanceDefinition.SetInstanceIngressEgressRuleSummary(ruleSummary)
+		}()
+		for _, eni := range instance.NetworkInterfaces {
+			networkinterfaces = append(networkinterfaces, newInstanceNetworkSummary(eni))
+		}
+		instanceDefinition.SetNetworkInterfaces(networkinterfaces)
+	}
+	wg.Wait()
+	return instanceDefinition, nil
+}
 func fetchInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Reservation {
 	instancesChan := make(chan []*ec2.Reservation)
 	go func() {
@@ -133,7 +137,7 @@ func fetchInstacneDetail(instanceId *string, client *aws.Client) chan []*ec2.Res
 	return instancesChan
 }
 
-func fetchInstanceVolume(volumemappings []*ec2.InstanceBlockDeviceMapping, client *aws.Client) []*instanceVolume {
+func fetchInstanceVolumeSummary(volumemappings []*ec2.InstanceBlockDeviceMapping, client *aws.Client) *instanceVolumeSummary {
 	volumeIds := []*string{}
 	volumes := []*instanceVolume{}
 	for _, b := range volumemappings {
@@ -141,16 +145,17 @@ func fetchInstanceVolume(volumemappings []*ec2.InstanceBlockDeviceMapping, clien
 	}
 	data, err := client.EC2.DescribeVolumes(&ec2.DescribeVolumesInput{VolumeIds: volumeIds})
 	if err != nil {
-		fmt.Println("error occurred in getInstanceVolume", err.Error())
-		return nil
+		log.Fatalf("error occurred in fetchInstanceVolumeSummary %s", err)
+		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
+		return newInstanceVolumeSummary(volumes, errorInfo)
 	}
 	for _, volume := range data.Volumes {
 		volumes = append(volumes, newInstanceVolume(volume))
 	}
-	return volumes
+	return newInstanceVolumeSummary(volumes, nil)
 }
 
-func fetchSecurityGroupsDetail(enis []*ec2.InstanceNetworkInterface, client *aws.Client) *instanceSGSummary {
+func fetchIngressEgressRuleSummary(enis []*ec2.InstanceNetworkInterface, client *aws.Client) *instanceIngressEgressRuleSummary {
 	securityGroupIds := []*string{}
 	for _, eni := range enis {
 		for _, sg := range eni.Groups {
@@ -159,20 +164,17 @@ func fetchSecurityGroupsDetail(enis []*ec2.InstanceNetworkInterface, client *aws
 	}
 	data, err := client.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{GroupIds: securityGroupIds})
 	if err != nil {
-		fmt.Println("error occured fetchSecurityGroupsDetail ", err)
-		return nil
+		log.Fatalf("error occured fetchIngressEgressRuleSummary %s", err)
+		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
+		return &instanceIngressEgressRuleSummary{apiError: errorInfo}
 	}
-	instanceSgSummary := &instanceSGSummary{groupIds: securityGroupIds}
+
 	ingressRules := []*ingressRule{}
 	egressRules := []*egressRule{}
 	for _, sg := range data.SecurityGroups {
 		ingressRules = append(ingressRules, newSecurityIngressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissions)...)
 		egressRules = append(egressRules, newSecurityEgressRules(*sg.GroupId, *sg.GroupName, *sg.Description, sg.IpPermissionsEgress)...)
 	}
-	// udpate ingress Rules
-	instanceSgSummary.ingressRules = ingressRules
-	// update egress Rules
-	instanceSgSummary.egressRules = egressRules
 
-	return instanceSgSummary
+	return &instanceIngressEgressRuleSummary{ingressRules: ingressRules, egressRules: egressRules}
 }

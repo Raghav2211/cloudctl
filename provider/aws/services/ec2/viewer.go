@@ -118,9 +118,8 @@ func instanceInfoViewer(o interface{}) viewer.Viewer {
 
 	cTviewer.AddTableViewer(renderInstanceSummary(instance.summary))
 	cTviewer.AddTableViewer(renderInstanceDetails(instance.detail))
-	cTviewer.AddTableViewer(renderInstanceSgSummaryInbound(instance.sgSummary))
-	cTviewer.AddTableViewer(renderInstanceSgSummaryOutbound(instance.sgSummary))
-	cTviewer.AddTableViewer(renderInstanceVolumeSummary(instance.volumes))
+	cTviewer.AddViewers(renderInstanceRulesSummary(instance.ruleSummary))
+	cTviewer.AddTableViewer(renderInstanceVolumeSummary(instance.volumesSummary))
 	cTviewer.AddTableViewer(renderInstanceNetworkSummary(instance.networkInterfaces))
 
 	return cTviewer
@@ -163,48 +162,62 @@ func renderInstanceDetails(o *instanceDetail) *viewer.TableViewer {
 	return tViewer
 }
 
-func renderInstanceSgSummaryInbound(o *instanceSGSummary) *viewer.TableViewer {
+func renderInstanceRulesSummary(summary *instanceIngressEgressRuleSummary) []viewer.Viewer {
+	viewers := []viewer.Viewer{}
+	if summary.apiError != nil {
+		errorViewer := viewer.NewErrorViewer()
+		errorViewer.SetErrorMessage(summary.apiError.Err.Error())
+		errorViewer.SetErrorType(summary.apiError.ErrorType)
+		viewers = append(viewers, errorViewer)
+	} else {
+		viewers = append(viewers, renderInstanceIngressRules(summary.ingressRules))
+		viewers = append(viewers, renderInstanceEgressRules(summary.egressRules))
+	}
+	return viewers
+}
+
+func renderInstanceIngressRules(rules []*ingressRule) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Ingress Rules")
 	tViewer.AddHeader(instanceSecurityGroupInboundSummaryTableHeader)
 
-	for _, inboundRule := range o.ingressRules {
+	for _, rule := range rules {
 		tViewer.AddRow(viewer.Row{
-			*inboundRule.portRange,
-			*inboundRule.protocol,
-			*inboundRule.source,
-			*inboundRule.sgId,
-			*inboundRule.desc,
+			*rule.portRange,
+			*rule.protocol,
+			*rule.source,
+			*rule.sgId,
+			*rule.desc,
 		})
 	}
 	return tViewer
 }
 
-func renderInstanceSgSummaryOutbound(o *instanceSGSummary) *viewer.TableViewer {
+func renderInstanceEgressRules(rules []*egressRule) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Egress Rules")
 	tViewer.AddHeader(instanceSecurityGroupOutboundSummaryTableHeader)
-	for _, outboundRule := range o.egressRules {
+	for _, rule := range rules {
 		tViewer.AddRow(viewer.Row{
-			*outboundRule.portRange,
-			*outboundRule.protocol,
-			*outboundRule.source,
-			*outboundRule.sgId,
-			*outboundRule.desc,
+			*rule.portRange,
+			*rule.protocol,
+			*rule.source,
+			*rule.sgId,
+			*rule.desc,
 		})
 	}
 	return tViewer
 }
 
-func renderInstanceVolumeSummary(volumes []*instanceVolume) *viewer.TableViewer {
+func renderInstanceVolumeSummary(volumesSummary *instanceVolumeSummary) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Volumes")
 	tViewer.AddHeader(instanceVolumeTableHeader)
 
-	for _, volume := range volumes {
+	for _, volume := range volumesSummary.volumes {
 		for _, attachment := range volume.attachments {
 			tViewer.AddRow(viewer.Row{
 				*attachment.id,

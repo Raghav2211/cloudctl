@@ -9,11 +9,27 @@ func (v *CompoundViewer) AddErrorViewer(errViewer *ErrorViewer) *CompoundViewer 
 	v.errViewers = append(v.errViewers, errViewer)
 	return v
 }
-
 func (v *CompoundViewer) AddTableViewer(tViewer *TableViewer) *CompoundViewer {
 	v.tViewers = append(v.tViewers, tViewer)
 	return v
 }
+
+func (v *CompoundViewer) AddViewer(viewer Viewer) *CompoundViewer {
+	if tviewer, ok := viewer.(*TableViewer); ok {
+		v.AddTableViewer(tviewer)
+	}
+	if eViewer, ok := viewer.(*ErrorViewer); ok {
+		v.AddErrorViewer(eViewer)
+	}
+	return v
+}
+func (v *CompoundViewer) AddViewers(viewers []Viewer) *CompoundViewer {
+	for _, viewer := range viewers {
+		v.AddViewer(viewer)
+	}
+	return v
+}
+
 func (v *CompoundViewer) IsErrorView() bool {
 	return len(v.errViewers) == 0 && len(v.tViewers) == 0
 }

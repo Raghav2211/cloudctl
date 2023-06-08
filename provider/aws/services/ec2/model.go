@@ -28,10 +28,10 @@ type egressRule struct {
 	sgId      *string
 	desc      *string
 }
-type instanceSGSummary struct {
-	groupIds     []*string
+type instanceIngressEgressRuleSummary struct {
 	ingressRules []*ingressRule
 	egressRules  []*egressRule
+	apiError     *aws.ErrorInfo
 }
 
 type instanceDetail struct {
@@ -63,6 +63,10 @@ type volumeAttachment struct {
 	device              *string
 	state               *string
 }
+type instanceVolumeSummary struct {
+	volumes  []*instanceVolume
+	apiError *aws.ErrorInfo
+}
 
 type instanceVolume struct {
 	creationTime *time.Time
@@ -91,8 +95,8 @@ type instanceNetworkinterface struct {
 type instanceDefinition struct {
 	summary           *instanceSummary
 	detail            *instanceDetail
-	volumes           []*instanceVolume
-	sgSummary         *instanceSGSummary
+	volumesSummary    *instanceVolumeSummary
+	ruleSummary       *instanceIngressEgressRuleSummary
 	networkInterfaces []*instanceNetworkinterface
 	err               error
 }
@@ -166,7 +170,7 @@ func newInstanceSummary(instance *ec2.Instance, tz *ctltime.Timezone) *instanceS
 	return instanceSummary
 }
 
-func newInstanceDetail(instance *ec2.Instance) *instanceDetail {
+func newInstanceDetail(instance *ec2.Instance, tz *ctltime.Timezone) *instanceDetail {
 	platform := NO_VALUE
 	if instance.Platform != nil {
 		platform = *instance.Platform
@@ -176,7 +180,13 @@ func newInstanceDetail(instance *ec2.Instance) *instanceDetail {
 		amiId:      instance.ImageId,
 		monitor:    instance.Monitoring.State,
 		osdetails:  instance.PlatformDetails,
-		launchTime: instance.LaunchTime,
+		launchTime: tz.AdaptTimezone(instance.LaunchTime),
+	}
+}
+func newInstanceVolumeSummary(volumes []*instanceVolume, apiError *aws.ErrorInfo) *instanceVolumeSummary {
+	return &instanceVolumeSummary{
+		volumes:  volumes,
+		apiError: apiError,
 	}
 }
 
@@ -351,8 +361,8 @@ func newInstanceDefinition() *instanceDefinition {
 	return &instanceDefinition{}
 }
 
-func (def *instanceDefinition) SetVolumeSummary(volumes []*instanceVolume) *instanceDefinition {
-	def.volumes = volumes
+func (def *instanceDefinition) SetVolumeSummary(volumesSummary *instanceVolumeSummary) *instanceDefinition {
+	def.volumesSummary = volumesSummary
 	return def
 }
 
@@ -364,8 +374,8 @@ func (def *instanceDefinition) SetInstanceDetail(detail *instanceDetail) *instan
 	def.detail = detail
 	return def
 }
-func (def *instanceDefinition) SetSecurityGroupSummary(sgSummary *instanceSGSummary) *instanceDefinition {
-	def.sgSummary = sgSummary
+func (def *instanceDefinition) SetInstanceIngressEgressRuleSummary(ruleSummary *instanceIngressEgressRuleSummary) *instanceDefinition {
+	def.ruleSummary = ruleSummary
 	return def
 }
 

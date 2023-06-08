@@ -1,8 +1,6 @@
 package ec2
 
 import (
-	"log"
-
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
@@ -75,7 +73,7 @@ func (f *InstanceListFilter) requestFilters() []*ec2.Filter {
 	if f.isSubnetsNotEmpty() {
 		filters = append(filters, f.subnetFilter())
 	}
-	log.Default().Println("RequestFilters ==> ", filters)
+	// log.Default().Println("RequestFilters ==> ", filters)
 	return filters
 }
 

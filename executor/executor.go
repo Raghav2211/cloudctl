@@ -16,17 +16,12 @@ type CommandExecutor struct {
 
 func (exe *CommandExecutor) Execute() error {
 	start := time.Now()
-	data, err := exe.Fetcher.Fetch()
-	if err != nil {
-		return err
+	data := exe.Fetcher.Fetch()
+	view := exe.Viewer(data)
+	view.View()
+	if view.IsErrorView() {
+		return nil
 	}
-	if exe.Viewer != nil {
-		viewType := exe.Viewer(data)
-		if viewType != nil {
-			viewType.View()
-		}
-	}
-
 	black := color.New(color.FgGreen)
 	boldBlack := black.Add(color.Bold)
 	defer boldBlack.Println("Time elapsed:", fmt.Sprintf("%.2f", time.Since(start).Seconds()), "sec")

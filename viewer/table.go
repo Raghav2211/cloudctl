@@ -8,14 +8,16 @@ import (
 
 type Row []interface{}
 
-type TableViewer struct {
-	title  string
-	header table.Row
-	rows   []table.Row
+type embedError struct {
+	err       error
+	errorType ErrorType
 }
 
-type CompoundTableViewer struct {
-	viewers []*TableViewer
+type TableViewer struct {
+	title      string
+	header     table.Row
+	rows       []table.Row
+	embedError embedError
 }
 
 func (t *TableViewer) AddHeader(header Row) *TableViewer {
@@ -48,6 +50,17 @@ func (t *TableViewer) SetTitle(title string) *TableViewer {
 	return t
 }
 
+func (t *TableViewer) SetError(err error, errorType ErrorType) *TableViewer {
+	t.embedError = embedError{
+		err:       err,
+		errorType: errorType,
+	}
+	return t
+}
+
+func (t *TableViewer) IsErrorView() bool {
+	return false
+}
 func (t *TableViewer) View() {
 	writer := table.NewWriter()
 	writer.SetTitle(t.title)
@@ -57,15 +70,5 @@ func (t *TableViewer) View() {
 		writer.AppendRow(row)
 	}
 	fmt.Println(writer.Render())
-}
 
-func (t *CompoundTableViewer) AddTableViewer(tViewer *TableViewer) *CompoundTableViewer {
-	t.viewers = append(t.viewers, tViewer)
-	return t
-}
-
-func (t *CompoundTableViewer) View() {
-	for _, tViewer := range t.viewers {
-		tViewer.View()
-	}
 }

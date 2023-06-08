@@ -2,6 +2,7 @@ package ec2
 
 import (
 	"cloudctl/viewer"
+	"fmt"
 	"strings"
 )
 
@@ -9,10 +10,11 @@ var (
 	instanceListTableHeader = viewer.Row{
 		"Id",
 		"Type",
-		"State",
 		"Az",
 		"PublicIp",
 		"PrivateIp",
+		"vpc",
+		"subnet",
 		"LaunchAt",
 	}
 	instanceSummaryTableHeader = viewer.Row{
@@ -78,193 +80,189 @@ var (
 )
 
 func instanceListViewer(o interface{}) viewer.Viewer {
-	tViewer := viewer.NewTableViewer()
-	tViewer.AddHeader(instanceListTableHeader)
-	tViewer.SetTitle("Instances")
 	data := o.(*instanceListOutput)
-	rows := []viewer.Row{}
-	for _, instance := range data.instances {
-		rows = append(rows, viewer.Row{
-			*instance.id,
-			*instance.typee,
-			*instance.state,
-			*instance.az,
-			*instance.publicIp,
-			*instance.privateIp,
-			*instance.launchTime,
-		})
+
+	if data.err != nil {
+		erroViewer := viewer.NewErrorViewer()
+		erroViewer.SetErrorType(data.err.ErrorType)
+		erroViewer.SetErrorMessage(data.err.Err.Error())
+		return erroViewer
 	}
-	tViewer.AddRows(rows)
-	return tViewer
+
+	compoundViewer := viewer.NewCompoundViewer()
+	for state, instanceSummaries := range data.instancesByState {
+		tViewer := viewer.NewTableViewer()
+		tViewer.AddHeader(instanceListTableHeader)
+		tViewer.SetTitle(fmt.Sprintf("Instances[%s]", state))
+		for _, instance := range instanceSummaries {
+			tViewer.AddRow(viewer.Row{
+				*instance.id,
+				*instance.typee,
+				*instance.az,
+				*instance.publicIp,
+				*instance.privateIp,
+				*instance.vpcId,
+				*instance.subnetId,
+				*instance.launchTime,
+			})
+		}
+		compoundViewer.AddTableViewer(tViewer)
+	}
+	return compoundViewer
 }
 
 func instanceInfoViewer(o interface{}) viewer.Viewer {
-	cTviewer := viewer.NewCompoundTableViewer()
+	cTviewer := viewer.NewCompoundViewer()
 
-	iSummaryTviewerChan := make(chan *viewer.TableViewer)
-	iDetailsTviewerChan := make(chan *viewer.TableViewer)
-	iSgInboundTviewerChan := make(chan *viewer.TableViewer)
-	iSgOutboundTviewerChan := make(chan *viewer.TableViewer)
-	iVolumeTviewerChan := make(chan *viewer.TableViewer)
-	iNetworkTviewerChan := make(chan *viewer.TableViewer)
-	instance := o.(*instanceDetailView)
-	go func() {
-		defer close(iSummaryTviewerChan)
-		renderInstanceSummary(iSummaryTviewerChan, instance.summary)
-	}()
-	go func() {
-		defer close(iDetailsTviewerChan)
-		renderInstanceDetails(iDetailsTviewerChan, instance.detail)
-	}()
-	go func() {
-		defer close(iSgInboundTviewerChan)
-		renderInstanceSgSummaryInbound(iSgInboundTviewerChan, instance.sgSummary)
-	}()
-	go func() {
-		defer close(iSgOutboundTviewerChan)
-		renderInstanceSgSummaryOutbound(iSgOutboundTviewerChan, instance.sgSummary)
-	}()
-	go func() {
-		defer close(iVolumeTviewerChan)
-		renderInstanceVolumeSummary(iVolumeTviewerChan, instance.volumes)
-	}()
-	go func() {
-		defer close(iNetworkTviewerChan)
-		renderInstanceNetworkSummary(iNetworkTviewerChan, instance.ntwrkSummary)
-	}()
-	cTviewer.AddTableViewer(<-iSummaryTviewerChan)
-	cTviewer.AddTableViewer(<-iDetailsTviewerChan)
-	cTviewer.AddTableViewer(<-iSgInboundTviewerChan)
-	cTviewer.AddTableViewer(<-iSgOutboundTviewerChan)
-	cTviewer.AddTableViewer(<-iVolumeTviewerChan)
-	cTviewer.AddTableViewer(<-iNetworkTviewerChan)
+	instance := o.(*instanceDefinition)
+
+	cTviewer.AddTableViewer(renderInstanceSummary(instance.summary))
+	cTviewer.AddTableViewer(renderInstanceDetails(instance.detail))
+	cTviewer.AddViewers(renderInstanceRulesSummary(instance.ruleSummary))
+	cTviewer.AddTableViewer(renderInstanceVolumeSummary(instance.volumesSummary))
+	cTviewer.AddTableViewer(renderInstanceNetworkSummary(instance.networkInterfaces))
+
 	return cTviewer
 }
 
-func renderInstanceSummary(outputChan chan<- *viewer.TableViewer, o *instanceSummary) {
+func renderInstanceSummary(o *instanceSummary) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Summary")
 	tViewer.AddHeader(instanceSummaryTableHeader)
 
 	tViewer.AddRow(viewer.Row{
-		o.id,
-		o.typee,
-		o.state,
-		o.publicIp,
-		o.publicIpDNS,
-		o.privateIp,
-		o.privateIpDNS,
-		o.vpcId,
-		o.subnetId,
-		o.iamroleArn,
+		*o.id,
+		*o.typee,
+		*o.state,
+		*o.publicIp,
+		*o.publicIpDNS,
+		*o.privateIp,
+		*o.privateIpDNS,
+		*o.vpcId,
+		*o.subnetId,
+		*o.iamroleArn,
 	})
-	outputChan <- tViewer
+	return tViewer
 }
 
-func renderInstanceDetails(outputChan chan<- *viewer.TableViewer, o *instanceDetail) {
+func renderInstanceDetails(o *instanceDetail) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Details")
 	tViewer.AddHeader(instanceDetailsTableHeader)
 
 	tViewer.AddRow(viewer.Row{
-		o.platform,
-		o.amiId,
-		o.monitor,
-		o.osdetails,
-		o.launchTime,
+		*o.platform,
+		*o.amiId,
+		*o.monitor,
+		*o.osdetails,
+		*o.launchTime,
 	})
-	outputChan <- tViewer
+	return tViewer
 }
 
-func renderInstanceSgSummaryInbound(outputChan chan<- *viewer.TableViewer, o *instanceSGSummary) {
+func renderInstanceRulesSummary(summary *instanceIngressEgressRuleSummary) []viewer.Viewer {
+	viewers := []viewer.Viewer{}
+	if summary.apiError != nil {
+		errorViewer := viewer.NewErrorViewer()
+		errorViewer.SetErrorMessage(summary.apiError.Err.Error())
+		errorViewer.SetErrorType(summary.apiError.ErrorType)
+		viewers = append(viewers, errorViewer)
+	} else {
+		viewers = append(viewers, renderInstanceIngressRules(summary.ingressRules))
+		viewers = append(viewers, renderInstanceEgressRules(summary.egressRules))
+	}
+	return viewers
+}
+
+func renderInstanceIngressRules(rules []*ingressRule) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
-	tViewer.SetTitle("SG/Inbound")
+	tViewer.SetTitle("Ingress Rules")
 	tViewer.AddHeader(instanceSecurityGroupInboundSummaryTableHeader)
 
-	for _, inboundRule := range o.inboundRules {
+	for _, rule := range rules {
 		tViewer.AddRow(viewer.Row{
-			inboundRule.portRange,
-			inboundRule.protocol,
-			inboundRule.source,
-			inboundRule.sgId,
-			inboundRule.desc,
+			*rule.portRange,
+			*rule.protocol,
+			*rule.source,
+			*rule.sgId,
+			*rule.desc,
 		})
 	}
-	outputChan <- tViewer
+	return tViewer
 }
 
-func renderInstanceSgSummaryOutbound(outputChan chan<- *viewer.TableViewer, o *instanceSGSummary) {
+func renderInstanceEgressRules(rules []*egressRule) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
-	tViewer.SetTitle("SG/Outbound")
+	tViewer.SetTitle("Egress Rules")
 	tViewer.AddHeader(instanceSecurityGroupOutboundSummaryTableHeader)
-	for _, outboundRule := range o.outboundRules {
+	for _, rule := range rules {
 		tViewer.AddRow(viewer.Row{
-			outboundRule.portRange,
-			outboundRule.protocol,
-			outboundRule.source,
-			outboundRule.sgId,
-			outboundRule.desc,
+			*rule.portRange,
+			*rule.protocol,
+			*rule.source,
+			*rule.sgId,
+			*rule.desc,
 		})
 	}
-	outputChan <- tViewer
+	return tViewer
 }
 
-func renderInstanceVolumeSummary(outputChan chan<- *viewer.TableViewer, volumes []*instanceVolume) {
+func renderInstanceVolumeSummary(volumesSummary *instanceVolumeSummary) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Volumes")
 	tViewer.AddHeader(instanceVolumeTableHeader)
 
-	for _, volume := range volumes {
+	for _, volume := range volumesSummary.volumes {
 		for _, attachment := range volume.attachments {
 			tViewer.AddRow(viewer.Row{
-				attachment.id,
-				attachment.device,
-				volume.size,
-				attachment.state,
-				attachment.time,
+				*attachment.id,
+				*attachment.device,
+				*volume.size,
+				*attachment.state,
+				*attachment.time,
 				volume.isEncrypt,
-				volume.kmsKey,
-				attachment.deleteOnTermination,
+				*volume.kmsKey,
+				*attachment.deleteOnTermination,
 			})
 		}
 	}
 
-	outputChan <- tViewer
+	return tViewer
 }
 
-func renderInstanceNetworkSummary(outputChan chan<- *viewer.TableViewer, instanceNetworkinterfaces []*instanceNetworkinterface) {
+func renderInstanceNetworkSummary(instanceNetworkinterfaces []*instanceNetworkinterface) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Networks")
 	tViewer.AddHeader(instanceNetworkSummaryTableHeader)
 
-	for _, ntwrkInterface := range instanceNetworkinterfaces {
+	for _, networkinterface := range instanceNetworkinterfaces {
 
 		securityGroupsArr := []string{}
-		for _, sg := range ntwrkInterface.securityGroups {
+		for _, sg := range *networkinterface.securityGroups {
 			securityGroupsArr = append(securityGroupsArr, *sg)
 		}
 
 		tViewer.AddRow(viewer.Row{
-			ntwrkInterface.id,
-			ntwrkInterface.description,
-			ntwrkInterface.privateIpv4Add,
-			ntwrkInterface.privateIpv4DNS,
-			ntwrkInterface.publicIpv4Add,
-			ntwrkInterface.publicIpv4DNS,
-			ntwrkInterface.attachTime,
-			ntwrkInterface.attachStatus,
-			ntwrkInterface.vpcId,
-			ntwrkInterface.subnetId,
-			ntwrkInterface.deleteOnTermination,
+			*networkinterface.id,
+			*networkinterface.description,
+			*networkinterface.privateIpv4Add,
+			*networkinterface.privateIpv4DNS,
+			*networkinterface.publicIpv4Add,
+			*networkinterface.publicIpv4DNS,
+			*networkinterface.attachTime,
+			*networkinterface.attachStatus,
+			*networkinterface.vpcId,
+			*networkinterface.subnetId,
+			*networkinterface.deleteOnTermination,
 			strings.Join(securityGroupsArr, "\n"),
 		})
 	}
 
-	outputChan <- tViewer
+	return tViewer
 }

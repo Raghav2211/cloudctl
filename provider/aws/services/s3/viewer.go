@@ -22,15 +22,18 @@ var (
 		"destination",
 		"size(bytes)",
 		"timeElapsed",
+		"error",
 	}
 )
 
 func bucketListViewer(o interface{}) viewer.Viewer {
 
 	data := o.(*bucketListOutput)
-	if len(data.buckets) == 0 {
-		fmt.Println("No buckets found!!")
-		return nil
+	if data.err != nil {
+		eView := viewer.ErrorViewer{}
+		eView.SetErrorMessage(data.err.Err.Error())
+		eView.SetErrorType(data.err.ErrorType)
+		return &eView
 	}
 
 	tViewer := viewer.NewTableViewer()
@@ -47,6 +50,16 @@ func bucketListViewer(o interface{}) viewer.Viewer {
 
 func bucketObjectsViewer(o interface{}) viewer.Viewer {
 	data := o.(*bucketObjectListOutput)
+
+	if data.err != nil {
+		// compoundViewer := viewer.NewCompoundViewer()
+		errViewer := viewer.NewErrorViewer()
+		errViewer.SetErrorMessage(data.err.Err.Error())
+		errViewer.SetErrorType(data.err.ErrorType)
+		// compoundViewer.AddErrorViewer(errView)
+		return errViewer
+
+	}
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.AddHeader(bucketObjectsTableHeader)
@@ -71,23 +84,42 @@ func bucketObjectsViewer(o interface{}) viewer.Viewer {
 }
 
 func bucketObjectsDownloadSummaryViewer(o interface{}) viewer.Viewer {
-	data := o.([]*bucketObjectsDownloadSummary)
+	data := o.(*bucketOjectsDownloadSummary)
+	if data.err != nil {
+		errViewer := viewer.NewErrorViewer()
+		errViewer.SetErrorMessage(data.err.Err.Error())
+		errViewer.SetErrorType(data.err.ErrorType)
+		return errViewer
+	}
+
 	tViewer := viewer.NewTableViewer()
 	tViewer.AddHeader(bucketObjectsDownloadSummaryTableHeader)
-	tViewer.SetTitle("Download Summary")
-	for _, summary := range data {
-		tViewer.AddRow(viewer.Row{
-			summary.source,
-			summary.destination,
-			summary.sizeinBytes,
-			summary.timeElapsed,
-		})
+	tViewer.SetTitle(fmt.Sprintf("[%s]: Download Summary", data.bucketName))
+	for _, summary := range data.objectsDownloadSummary {
+		if summary.err != nil {
+			tViewer.AddRow(viewer.Row{
+				summary.source,
+				summary.destination,
+				summary.sizeinBytes,
+				summary.timeElapsed,
+				summary.err.Err.Error(),
+			})
+		} else {
+			tViewer.AddRow(viewer.Row{
+				summary.source,
+				summary.destination,
+				summary.sizeinBytes,
+				summary.timeElapsed,
+				"N/A",
+			})
+		}
+
 	}
 	return tViewer
 
 }
 
 func bucketConfigurationViewer(o interface{}) viewer.Viewer {
-	o.(*bucketInfo).Pretty()
+	o.(*bucketDefinition).Pretty()
 	return nil
 }

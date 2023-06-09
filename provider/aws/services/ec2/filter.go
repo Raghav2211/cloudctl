@@ -11,6 +11,7 @@ const (
 	az_key                  = "availability-zone"
 	vpc_id_key              = "vpc-id"
 	subnet_id_key           = "subnet-id"
+	launch_time_key         = "launch-time"
 )
 
 type InstanceListFilterOptFunc func(*InstanceListFilter)
@@ -22,6 +23,7 @@ type InstanceListFilter struct {
 	vpcIds         []string
 	subnetIds      []string
 	hasPublicIp    *bool
+	launchAt       *string
 }
 
 func (f *InstanceListFilter) applyCustomFilter(instance *ec2.Instance) bool {
@@ -38,6 +40,7 @@ func (f *InstanceListFilter) requestFilters() []*ec2.Filter {
 	azFilter := f.azFilter()
 	vpcFilter := f.vpcFilter()
 	subnetFilter := f.subnetFilter()
+	launchAtFilter := f.launchAtFilter()
 	if stateFilter != nil {
 		filters = append(filters, stateFilter)
 	}
@@ -52,6 +55,9 @@ func (f *InstanceListFilter) requestFilters() []*ec2.Filter {
 	}
 	if subnetFilter != nil {
 		filters = append(filters, subnetFilter)
+	}
+	if launchAtFilter != nil {
+		filters = append(filters, launchAtFilter)
 	}
 	// log.Default().Println("requestFilters ==> ", filters)
 	// log.Default().Println("customFilter ==> ", filters)
@@ -134,6 +140,20 @@ func (f *InstanceListFilter) subnetFilter() *ec2.Filter {
 	return filter
 }
 
+func (f *InstanceListFilter) launchAtFilter() *ec2.Filter {
+	if f.launchAt == nil {
+		return nil
+	}
+
+	filter := &ec2.Filter{
+		Name: aws.String(launch_time_key),
+		Values: []*string{
+			aws.String(*f.launchAt),
+		},
+	}
+	return filter
+}
+
 func NewInstanceFilter(optfuncs ...InstanceListFilterOptFunc) *InstanceListFilter {
 	filter := &InstanceListFilter{
 		hasPublicIp: nil,
@@ -171,6 +191,12 @@ func WithVpcIds(vpcIds []string) InstanceListFilterOptFunc {
 func WithSubnetsIds(subnetIds []string) InstanceListFilterOptFunc {
 	return func(filter *InstanceListFilter) {
 		filter.subnetIds = subnetIds
+	}
+}
+
+func WithLaunchAt(time string) InstanceListFilterOptFunc {
+	return func(filter *InstanceListFilter) {
+		filter.launchAt = &time
 	}
 }
 

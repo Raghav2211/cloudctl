@@ -7,12 +7,13 @@ import (
 )
 
 type eC2ListCmd struct {
-	InstanceStates    []string `name:"state" help:"Return instance list of specific state(s) | values [running,stopped,terminated,shutting-down]" default:""`
-	InstanceTypes     []string `name:"type" help:"Return instance list of specific type(s)" default:""`
+	InstanceStates    []string `name:"state" help:"Return instance list of specific state(s) | values (pending | running | shutting-down | terminated | stopping | stopped)" default:""`
+	InstanceTypes     []string `name:"type" help:"Return instance list of specific type(s) (for example, t2.micro)" default:""`
 	AvailabilityZones []string `name:"az" help:"Return instance list of specific availability zone(s)" default:""`
 	VpcIds            []string `name:"vpc" help:"Return instance list of specific vpcId(s)" default:""`
 	SubnetIds         []string `name:"subnet" help:"Return instance list of specific subnet(s)" default:""`
 	HasPublicIp       *bool    `name:"has-public-ip" help:"Return instance list which have public ip associate"`
+	LaunchAtString    *string  `name:"launchat" help:"The time when the instance was launched, in the ISO 8601 format in the UTC time zone (YYYY-MM-DDThh:mm:ss.sssZ), for example, 2021-09-29T11:04:43.305Z. You can use a wildcard (*), for example, 2021-09-29T*, which matches an entire day."`
 }
 
 type instanceDefinitionCmd struct {
@@ -35,6 +36,9 @@ func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
 	}
 	if cmd.HasPublicIp != nil {
 		filters = append(filters, ec2.WithHasPublicIp())
+	}
+	if cmd.LaunchAtString != nil {
+		filters = append(filters, ec2.WithLaunchAt(*cmd.LaunchAtString))
 	}
 	filter := ec2.NewInstanceFilter(filters...)
 

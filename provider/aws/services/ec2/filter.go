@@ -21,6 +21,14 @@ type InstanceListFilter struct {
 	azs            []string
 	vpcIds         []string
 	subnetIds      []string
+	hasPublicIp    *bool
+}
+
+func (f *InstanceListFilter) applyCustomFilter(instance *ec2.Instance) bool {
+	if f.hasPublicIp != nil && instance.PublicIpAddress == nil {
+		return false
+	}
+	return true
 }
 
 func (f *InstanceListFilter) requestFilters() []*ec2.Filter {
@@ -45,7 +53,8 @@ func (f *InstanceListFilter) requestFilters() []*ec2.Filter {
 	if subnetFilter != nil {
 		filters = append(filters, subnetFilter)
 	}
-	// log.Default().Println("RequestFilters ==> ", filters)
+	// log.Default().Println("requestFilters ==> ", filters)
+	// log.Default().Println("customFilter ==> ", filters)
 	return filters
 }
 
@@ -126,7 +135,9 @@ func (f *InstanceListFilter) subnetFilter() *ec2.Filter {
 }
 
 func NewInstanceFilter(optfuncs ...InstanceListFilterOptFunc) *InstanceListFilter {
-	filter := &InstanceListFilter{}
+	filter := &InstanceListFilter{
+		hasPublicIp: nil,
+	}
 	for _, optfunc := range optfuncs {
 		optfunc(filter)
 	}
@@ -160,5 +171,11 @@ func WithVpcIds(vpcIds []string) InstanceListFilterOptFunc {
 func WithSubnetsIds(subnetIds []string) InstanceListFilterOptFunc {
 	return func(filter *InstanceListFilter) {
 		filter.subnetIds = subnetIds
+	}
+}
+
+func WithHasPublicIp() InstanceListFilterOptFunc {
+	return func(filter *InstanceListFilter) {
+		filter.hasPublicIp = aws.Bool(true)
 	}
 }

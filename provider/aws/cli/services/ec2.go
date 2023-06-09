@@ -2,7 +2,7 @@ package services
 
 import (
 	"cloudctl/provider/aws/cli/globals"
-	rawsec2 "cloudctl/provider/aws/services/ec2"
+	"cloudctl/provider/aws/services/ec2"
 	"log"
 )
 
@@ -12,6 +12,7 @@ type eC2ListCmd struct {
 	AvailabilityZones []string `name:"az" help:"Return instance list of specific availability zone(s)" default:""`
 	VpcIds            []string `name:"vpc" help:"Return instance list of specific vpcId(s)" default:""`
 	SubnetIds         []string `name:"subnet" help:"Return instance list of specific subnet(s)" default:""`
+	HasPublicIp       *bool    `name:"has-public-ip" help:"Return instance list which have public ip associate"`
 }
 
 type instanceDefinitionCmd struct {
@@ -24,15 +25,20 @@ type EC2Command struct {
 }
 
 func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
-	filter := rawsec2.NewInstanceFilter(
-		rawsec2.WithAvailabilityZone(cmd.AvailabilityZones),
-		rawsec2.WithInstanceStates(cmd.InstanceStates),
-		rawsec2.WithInstanceType(cmd.InstanceTypes),
-		rawsec2.WithSubnetsIds(cmd.SubnetIds),
-		rawsec2.WithVpcIds(cmd.VpcIds),
-	)
 
-	icmd := rawsec2.NewinstanceListCommandExecutor(globals, *filter)
+	filters := []ec2.InstanceListFilterOptFunc{
+		ec2.WithAvailabilityZone(cmd.AvailabilityZones),
+		ec2.WithInstanceStates(cmd.InstanceStates),
+		ec2.WithInstanceType(cmd.InstanceTypes),
+		ec2.WithSubnetsIds(cmd.SubnetIds),
+		ec2.WithVpcIds(cmd.VpcIds),
+	}
+	if cmd.HasPublicIp != nil {
+		filters = append(filters, ec2.WithHasPublicIp())
+	}
+	filter := ec2.NewInstanceFilter(filters...)
+
+	icmd := ec2.NewinstanceListCommandExecutor(globals, *filter)
 	err := icmd.Execute()
 	if err != nil {
 		return err
@@ -43,7 +49,7 @@ func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
 
 func (cmd *instanceDefinitionCmd) Run(globals *globals.CLIFlag) error {
 	log.Default().Println("get definition for :", cmd.Id)
-	icmd := rawsec2.NewinstanceDescribeCommandExecutor(globals, cmd.Id)
+	icmd := ec2.NewinstanceDescribeCommandExecutor(globals, cmd.Id)
 	err := icmd.Execute()
 	if err != nil {
 		return err

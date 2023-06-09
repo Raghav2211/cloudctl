@@ -50,20 +50,25 @@ func (f instanceDefinitionFetcher) Fetch() interface{} {
 	return definition
 }
 
-func fetchInstanceList(client *aws.Client, filter InstanceListFilter) (*[]*ec2.Instance, error) {
-
+func fetchInstanceList(client *aws.Client, instanceListFilter InstanceListFilter) (*[]*ec2.Instance, error) {
 	var fetch func(filter []*ec2.Filter, nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error
 
 	fetch = func(filter []*ec2.Filter, nextMarker string, instances *[]*ec2.Instance, client *aws.Client) error {
 		result, err := client.EC2.DescribeInstances(&ec2.DescribeInstancesInput{
 			Filters:   filter,
 			NextToken: &nextMarker,
+			// DryRun:    &dryRun, // TODO check whether requester is valid or not
 		})
 		if err != nil {
 			return err
 		}
 		for _, reservation := range result.Reservations {
-			*instances = append(*instances, reservation.Instances...)
+			for _, instance := range reservation.Instances {
+				customFilterOp := instanceListFilter.applyCustomFilter(instance)
+				if customFilterOp {
+					*instances = append(*instances, instance)
+				}
+			}
 		}
 		if result.NextToken != nil {
 			nextMarker = *result.NextToken
@@ -75,8 +80,8 @@ func fetchInstanceList(client *aws.Client, filter InstanceListFilter) (*[]*ec2.I
 	}
 	nextMarker := ""
 	instances := []*ec2.Instance{}
-	apiFilter := filter.requestFilters()
-	apiFilter = append(apiFilter, filter.instanceTypeFilter())
+	apiFilter := instanceListFilter.requestFilters()
+	apiFilter = append(apiFilter, instanceListFilter.instanceTypeFilter())
 	err := fetch(apiFilter, nextMarker, &instances, client)
 	return &instances, err
 }

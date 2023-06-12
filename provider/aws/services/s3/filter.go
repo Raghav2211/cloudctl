@@ -18,19 +18,14 @@ func (f *BucketListFilter) applyCustomFilter(bucket *s3.Bucket) bool {
 	if f.bucketNameString == nil && f.creationDateString == nil {
 		return true
 	}
-	if f.bucketNameString != nil && strings.Contains(*bucket.Name, *f.bucketNameString) {
-		return true
+	if f.bucketNameString != nil && f.creationDateString != nil {
+		return bucketNameFilter(*bucket.Name, *f.bucketNameString) && creationDateFilter(*bucket.CreationDate, *f.creationDateString)
+	}
+	if f.bucketNameString != nil {
+		return bucketNameFilter(*bucket.Name, *f.bucketNameString)
 	}
 	if f.creationDateString != nil {
-		isLastCharWildCard := strings.Index(*f.creationDateString, "*") == len(*f.creationDateString)-1
-		if isLastCharWildCard {
-			creationDateWithwildCard := *f.creationDateString
-			// convert bucket created time to ISO-8601
-			bucketCreatedTime := bucket.CreationDate.Format(time.RFC3339)
-			return strings.Contains(bucketCreatedTime, creationDateWithwildCard[:len(creationDateWithwildCard)-1])
-		} else {
-			return strings.Contains(bucket.CreationDate.GoString(), *f.creationDateString)
-		}
+		return creationDateFilter(*bucket.CreationDate, *f.creationDateString)
 	}
 	return false
 }
@@ -55,5 +50,21 @@ func WithCreationDateFilter(creationDateString string) BucketListFilterOptFunc {
 func WithBucketNameFilter(bucketNameString string) BucketListFilterOptFunc {
 	return func(blf *BucketListFilter) {
 		blf.bucketNameString = &bucketNameString
+	}
+}
+
+func bucketNameFilter(bucketNameFromAPI, bucketNameFromCLI string) bool {
+	return strings.Contains(bucketNameFromAPI, bucketNameFromCLI)
+}
+
+func creationDateFilter(dateFromAPI time.Time, creationDateInString string) bool {
+
+	isLastCharWildCard := strings.Index(creationDateInString, "*") == len(creationDateInString)-1
+	// convert bucket created time to ISO-8601
+	bucketCreatedTime := dateFromAPI.Format(time.RFC3339)
+	if isLastCharWildCard {
+		return strings.Contains(bucketCreatedTime, creationDateInString[:len(creationDateInString)-1])
+	} else {
+		return strings.Contains(bucketCreatedTime, creationDateInString)
 	}
 }

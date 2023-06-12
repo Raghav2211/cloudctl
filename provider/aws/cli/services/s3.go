@@ -3,12 +3,11 @@ package services
 import (
 	"cloudctl/provider/aws/cli/globals"
 	"cloudctl/provider/aws/services/s3"
-	ctls3 "cloudctl/provider/aws/services/s3"
 )
 
 type listCmd struct {
-	BucketNameString   string `name:"name" help:"Get list of bucket which contains provided value in their name"`
-	CreationDateString string `name:"createAt" help:"The time when the bucket was created, in the ISO 8601 format in the UTC time zone (YYYY-MM-DDThh:mm:ss.sssZ), for example, 2021-09-29T11:04:43.305Z. You can use a wildcard (*), for example, 2021-09-29T*, which matches an entire day."`
+	BucketNameInString   string `name:"name" help:"Get list of bucket which contains provided value in their name"`
+	CreationDateInString string `name:"createAt" help:"The time when the bucket was created, in the ISO 8601 format in the UTC time zone (YYYY-MM-DDThh:mm:ss.sssZ), for example, 2021-09-29T11:04:43.305Z. You can use a wildcard (*), for example, 2021-09-29T*, which matches an entire day."`
 }
 
 type listBucketObjectsCmd struct {
@@ -39,15 +38,15 @@ type S3Command struct {
 func (cmd *listCmd) Run(flag *globals.CLIFlag) error {
 
 	bucketListFilterOpts := []s3.BucketListFilterOptFunc{}
-	if cmd.BucketNameString != "" {
-		bucketListFilterOpts = append(bucketListFilterOpts, s3.WithBucketNameFilter(cmd.BucketNameString))
+	if cmd.BucketNameInString != "" {
+		bucketListFilterOpts = append(bucketListFilterOpts, s3.WithBucketNameFilter(cmd.BucketNameInString))
 	}
-	if cmd.CreationDateString != "" {
-		bucketListFilterOpts = append(bucketListFilterOpts, s3.WithCreationDateFilter(cmd.CreationDateString))
+	if cmd.CreationDateInString != "" {
+		bucketListFilterOpts = append(bucketListFilterOpts, s3.WithCreationDateFilter(cmd.CreationDateInString))
 	}
 	filter := s3.NewBucketListFilter(bucketListFilterOpts...)
 
-	icmd := ctls3.NewBucketListCommandExecutor(flag, filter)
+	icmd := s3.NewBucketListCommandExecutor(flag, filter)
 	err := icmd.Execute()
 	if err != nil {
 		return err
@@ -56,7 +55,7 @@ func (cmd *listCmd) Run(flag *globals.CLIFlag) error {
 }
 
 func (cmd *listBucketObjectsCmd) Run(flag *globals.CLIFlag) error {
-	icmd := ctls3.NewBucketObjectListCommandExecutor(flag, cmd.BucketName, cmd.ObjectPrefix)
+	icmd := s3.NewBucketObjectListCommandExecutor(flag, cmd.BucketName, cmd.ObjectPrefix)
 	err := icmd.Execute()
 	if err != nil {
 		return err
@@ -65,7 +64,7 @@ func (cmd *listBucketObjectsCmd) Run(flag *globals.CLIFlag) error {
 }
 
 func (cmd *bucketDefinitionCmd) Run(flag *globals.CLIFlag) error {
-	icmd := ctls3.NewBucketViewCommandExecutor(flag, cmd.BucketName)
+	icmd := s3.NewBucketViewCommandExecutor(flag, cmd.BucketName)
 	err := icmd.Execute()
 	if err != nil {
 		return err
@@ -74,7 +73,7 @@ func (cmd *bucketDefinitionCmd) Run(flag *globals.CLIFlag) error {
 }
 
 func (cmd *bucketObjectDownloadCmd) Run(flag *globals.CLIFlag) error {
-	icmd := ctls3.NewBucketObjectDownloadCommandExecutor(flag, cmd.BucketName, cmd.Key, cmd.Path, cmd.Recursive)
+	icmd := s3.NewBucketObjectDownloadCommandExecutor(flag, cmd.BucketName, cmd.Key, cmd.Path, cmd.Recursive)
 	err := icmd.Execute()
 	if err != nil {
 		return err

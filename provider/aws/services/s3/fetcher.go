@@ -17,7 +17,7 @@ import (
 
 type bucketListFetcher struct {
 	client *aws.Client
-	filter *bucketListFilter
+	filter *BucketListFilter
 	tz     *itime.Timezone
 }
 
@@ -55,7 +55,7 @@ func (f bucketListFetcher) Fetch() interface{} {
 	}
 	buckets := []*bucketOutput{}
 	for _, o := range apiOutput.Buckets {
-		if f.filter.Apply(o) {
+		if f.filter.applyCustomFilter(o) {
 			buckets = append(buckets, newBucketOutput(o, f.tz))
 		}
 	}

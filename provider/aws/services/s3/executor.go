@@ -6,51 +6,22 @@ import (
 	"cloudctl/provider/aws/cli/globals"
 
 	ctltime "cloudctl/time"
-	"fmt"
-	"time"
 )
 
 const (
 	DATE_PASER = "2006-01-02 15:04:05"
 )
 
-func NewBucketListCommandExecutor(flag *globals.CLIFlag, from, to, bucketNameString string) *executor.CommandExecutor {
+func NewBucketListCommandExecutor(flag *globals.CLIFlag, filter *BucketListFilter) *executor.CommandExecutor {
 	tz := ctltime.GetTZ(flag.TZShortIdentifier)
-	dFrom := new(time.Time)
-	dTo := new(time.Time)
-	if len(from) != 0 {
-		time, err := time.Parse(DATE_PASER, from)
-		// TODO : handle error
-		if err != nil {
-			panic(err)
-		}
-		dFrom = tz.AdaptTimezone(&time)
-	}
-	if len(to) != 0 {
-		time, err := time.Parse(DATE_PASER, to)
-		// TODO : handle error
-		if err != nil {
-			panic(err)
-		}
-		dTo = tz.AdaptTimezone(&time)
-	}
-	if (!dFrom.IsZero() && !dTo.IsZero()) && (dFrom.After(*dTo)) {
-		// TODO : handle error
-		panic(fmt.Sprintf("from can't be after to if both provide | from=%s , to=%s", from, to))
-	}
 
 	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
 
 	return &executor.CommandExecutor{
 		Fetcher: &bucketListFetcher{
 			client: client,
-			filter: &bucketListFilter{
-				creationDateFrom: dFrom,
-				creationDateTo:   dTo,
-				bucketNameString: &bucketNameString,
-				tz:               tz,
-			},
-			tz: tz,
+			filter: filter,
+			tz:     tz,
 		},
 		Viewer: bucketListViewer,
 	}

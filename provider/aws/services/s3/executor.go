@@ -27,7 +27,7 @@ func NewBucketListCommandExecutor(flag *globals.CLIFlag, filter *BucketListFilte
 	}
 }
 
-func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName, bucketPrefix string) *executor.CommandExecutor {
+func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName string, bucketPrefix *string, maxKeys int64) *executor.CommandExecutor {
 	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
 
 	return &executor.CommandExecutor{
@@ -35,6 +35,7 @@ func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName, bucke
 			client:       client,
 			bucketName:   bucketName,
 			objectPrefix: bucketPrefix,
+			maxKeys:      maxKeys,
 			tz:           ctltime.GetTZ(flag.TZShortIdentifier),
 		},
 		Viewer: bucketObjectsViewer,

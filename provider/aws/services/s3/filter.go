@@ -41,15 +41,19 @@ func NewBucketListFilter(optFuncs ...BucketListFilterOptFunc) *BucketListFilter 
 	return filter
 }
 
-func WithCreationDateFilter(creationDateString string) BucketListFilterOptFunc {
+func WithCreationDateFilter(creationDateString *string) BucketListFilterOptFunc {
 	return func(blf *BucketListFilter) {
-		blf.creationDateString = &creationDateString
+		if creationDateString != nil {
+			blf.creationDateString = creationDateString
+		}
 	}
 }
 
-func WithBucketNameFilter(bucketNameString string) BucketListFilterOptFunc {
+func WithBucketNameFilter(bucketNameString *string) BucketListFilterOptFunc {
 	return func(blf *BucketListFilter) {
-		blf.bucketNameString = &bucketNameString
+		if bucketNameString != nil {
+			blf.bucketNameString = bucketNameString
+		}
 	}
 }
 

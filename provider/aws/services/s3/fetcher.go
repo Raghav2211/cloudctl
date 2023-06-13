@@ -25,7 +25,8 @@ type bucketObjectsFetcher struct {
 	client *aws.Client
 	// fetch all objects for provided bucket
 	bucketName   string
-	objectPrefix string
+	objectPrefix *string
+	maxKeys      int64
 	tz           *itime.Timezone
 }
 
@@ -69,7 +70,7 @@ func (f bucketListFetcher) Fetch() interface{} {
 func (f bucketObjectsFetcher) Fetch() interface{} {
 	output := []*bucketObjectOutput{}
 
-	objectsPtr, err := fetchBucketObjects(f.bucketName, f.objectPrefix, f.client)
+	objectsPtr, err := fetchBucketObjects(f.bucketName, f.objectPrefix, f.maxKeys, f.client)
 
 	for _, o := range *objectsPtr {
 		output = append(output, newBucketObjectOutput(o, f.tz))
@@ -147,7 +148,6 @@ func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
 		if len(apiOutput.Contents) == 0 {
 			return &bucketOjectsDownloadSummary{err: aws.NewErrorInfo(NoObjectFoundWithGivenPrefix(f.bucketName, f.key), viewer.WARN, nil)}
 		}
-
 		for _, object := range apiOutput.Contents {
 			go downloadObject(f.bucketName, *object.Key, f.path, f.client, objectDownloadSummaryChan)
 		}
@@ -161,17 +161,20 @@ func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
 	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary, err: nil}
 }
 
-func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[]*s3.Object, error) {
+func fetchBucketObjects(bucketName string, objectPrefix *string, maxKeys int64, client *aws.Client) (*[]*s3.Object, error) {
 
-	var fetch func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarket string, client *aws.Client) error
+	var fetch func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) error
 
-	fetch = func(bucketName, objectPrefix string, objectsPtr *[]*s3.Object, nextMarker string, client *aws.Client) error {
+	fetch = func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) error {
+		if remainingKeys == 0 { // terminate condition
+			return nil
+		}
+
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &bucketName
-		input.Prefix = &objectPrefix
-		if nextMarker != "" {
-			input.Marker = &nextMarker
-		}
+		input.Prefix = objectPrefix
+		input.MaxKeys = &remainingKeys
+		input.Marker = marker
 
 		apiOutput, err := client.S3.ListObjects(input)
 		if err != nil {
@@ -179,14 +182,15 @@ func fetchBucketObjects(bucketName, objectPrefix string, client *aws.Client) (*[
 		}
 		*objectsPtr = append(*objectsPtr, apiOutput.Contents...)
 		if *apiOutput.IsTruncated {
-			nextMarker = *apiOutput.Contents[len(apiOutput.Contents)-1].Key
-			fetch(bucketName, objectPrefix, objectsPtr, nextMarker, client)
+			marker = apiOutput.Contents[len(apiOutput.Contents)-1].Key
+			remainingKeys := remainingKeys - int64(len(*objectsPtr))
+			fetch(bucketName, objectPrefix, remainingKeys, objectsPtr, marker, client)
 		}
 		return nil
 	}
 	objects := []*s3.Object{}
-	nextMarker := "" // empty marker
-	err := fetch(bucketName, objectPrefix, &objects, nextMarker, client)
+	nextMarker := "" // empty marker to start process
+	err := fetch(bucketName, objectPrefix, maxKeys, &objects, &nextMarker, client)
 	return &objects, err
 }
 

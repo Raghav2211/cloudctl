@@ -6,15 +6,14 @@ import (
 )
 
 type listCmd struct {
-	BucketNameInString   string `name:"name" help:"Get list of bucket which contains provided value in their name"`
-	CreationDateInString string `name:"createAt" help:"The time when the bucket was created, in the ISO 8601 format in the UTC time zone (YYYY-MM-DDThh:mm:ss.sssZ), for example, 2021-09-29T11:04:43.305Z. You can use a wildcard (*), for example, 2021-09-29T*, which matches an entire day."`
+	BucketNameInString   *string `name:"name" help:"List of bucket which contains provided value in their name"`
+	CreationDateInString *string `name:"createAt" help:"The time when the bucket was created, in the ISO 8601 format in the UTC time zone (YYYY-MM-DDThh:mm:ss.sssZ), for example, 2021-09-29T11:04:43.305Z. You can use a wildcard (*), for example, 2021-09-29T*"`
 }
 
 type listBucketObjectsCmd struct {
-	ObjectPrefix  string `name:"prefix" help:"Bucket Object prefix"`
-	MaxKeysReturn int    `name:"max-keys" default:"1000" help:"Number of bucket objects return | Default value is 1000"`                         // TODO: apply this
-	Full          bool   `name:"all" help:"It's a heavy operation & will take cost. This mode will list all bucket objects with applied filter"` // TODO: apply this
-	BucketName    string `name:"name" arg:"required" help:"Bucket name"`
+	ObjectPrefix  *string `name:"prefix" help:"Bucket Object prefix"`
+	MaxKeysReturn int64   `name:"max-keys" default:"100" help:"Number of bucket objects return | Default value is 100"`
+	BucketName    string  `name:"name" arg:"required" help:"Bucket name"`
 }
 
 type bucketDefinitionCmd struct {
@@ -23,28 +22,24 @@ type bucketDefinitionCmd struct {
 
 type bucketObjectDownloadCmd struct {
 	BucketName string `name:"name" arg:"required" help:"Bucket name"`
-	Key        string `name:"key" arg:"required" help:"Bucket Key or Key prefix"`
+	Key        string `name:"key" arg:"required" help:"Bucket key or key prefix"`
 	Path       string `name:"path" type:"path" help:"Path to local store the object(s), Default is current directory" arg:"required" default:"."`
 	Recursive  bool   `name:"recursive" help:"This mode will download all objects recursively with provided key as prefix"`
 }
 
 type S3Command struct {
-	List                 listCmd                 `name:"ls" cmd:"" help:"List s3 buckets"`
-	ListBucketObjects    listBucketObjectsCmd    `name:"list-objects" cmd:"" help:"List s3 bucket objects"`
-	BucketDefinition     bucketDefinitionCmd     `name:"def" cmd:"" help:"Get bucket definition"`
+	List                 listCmd                 `name:"ls" cmd:"" help:"Return list s3 buckets"`
+	ListBucketObjects    listBucketObjectsCmd    `name:"list-objects" cmd:"" help:"Return list of objects of s3 bucket"`
+	BucketDefinition     bucketDefinitionCmd     `name:"def" cmd:"" help:"Return bucket definition"`
 	BucketObjectDownload bucketObjectDownloadCmd `name:"get" cmd:"" help:"Download bucket object(s)"`
 }
 
 func (cmd *listCmd) Run(flag *globals.CLIFlag) error {
 
-	bucketListFilterOpts := []s3.BucketListFilterOptFunc{}
-	if cmd.BucketNameInString != "" {
-		bucketListFilterOpts = append(bucketListFilterOpts, s3.WithBucketNameFilter(cmd.BucketNameInString))
-	}
-	if cmd.CreationDateInString != "" {
-		bucketListFilterOpts = append(bucketListFilterOpts, s3.WithCreationDateFilter(cmd.CreationDateInString))
-	}
-	filter := s3.NewBucketListFilter(bucketListFilterOpts...)
+	filter := s3.NewBucketListFilter(
+		s3.WithBucketNameFilter(cmd.BucketNameInString),
+		s3.WithCreationDateFilter(cmd.CreationDateInString),
+	)
 
 	icmd := s3.NewBucketListCommandExecutor(flag, filter)
 	err := icmd.Execute()
@@ -55,7 +50,7 @@ func (cmd *listCmd) Run(flag *globals.CLIFlag) error {
 }
 
 func (cmd *listBucketObjectsCmd) Run(flag *globals.CLIFlag) error {
-	icmd := s3.NewBucketObjectListCommandExecutor(flag, cmd.BucketName, cmd.ObjectPrefix)
+	icmd := s3.NewBucketObjectListCommandExecutor(flag, cmd.BucketName, cmd.ObjectPrefix, cmd.MaxKeysReturn)
 	err := icmd.Execute()
 	if err != nil {
 		return err

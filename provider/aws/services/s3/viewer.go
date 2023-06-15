@@ -51,35 +51,43 @@ func bucketListViewer(o interface{}) viewer.Viewer {
 func bucketObjectsViewer(o interface{}) viewer.Viewer {
 	data := o.(*bucketObjectListOutput)
 
-	if data.err != nil {
-		// compoundViewer := viewer.NewCompoundViewer()
+	compoundViewer := viewer.NewCompoundViewer()
+	if data.err != nil && (data.err.ErrorType == viewer.ERROR || data.err.ErrorType == viewer.WARN) {
 		errViewer := viewer.NewErrorViewer()
 		errViewer.SetErrorMessage(data.err.Err.Error())
 		errViewer.SetErrorType(data.err.ErrorType)
-		// compoundViewer.AddErrorViewer(errView)
+		compoundViewer.AddViewer(errViewer)
 		return errViewer
 
 	}
+	if len(data.objects) > 0 {
+		tViewer := viewer.NewTableViewer()
+		tViewer.AddHeader(bucketObjectsTableHeader)
+		tViewer.SetTitle(*data.bucketName)
 
-	tViewer := viewer.NewTableViewer()
-	tViewer.AddHeader(bucketObjectsTableHeader)
-	tViewer.SetTitle(*data.bucketName)
-
-	// sort by LastModified DESC
-	sort.Slice(data.objects, func(i, j int) bool {
-		return data.objects[i].lastModified.After(*data.objects[j].lastModified)
-	})
-
-	for _, content := range data.objects {
-		tViewer.AddRow(viewer.Row{
-			*content.key,
-			*content.sizeInBytes,
-			*content.storageClass,
-			*content.lastModified,
+		// sort by LastModified DESC
+		sort.Slice(data.objects, func(i, j int) bool {
+			return data.objects[i].lastModified.After(*data.objects[j].lastModified)
 		})
+
+		for _, content := range data.objects {
+			tViewer.AddRow(viewer.Row{
+				*content.key,
+				*content.sizeInBytes,
+				*content.storageClass,
+				*content.lastModified,
+			})
+		}
+		compoundViewer.AddViewer(tViewer)
 	}
 
-	return tViewer
+	if data.err != nil {
+		errViewer := viewer.NewErrorViewer()
+		errViewer.SetErrorMessage(data.err.Err.Error())
+		errViewer.SetErrorType(data.err.ErrorType)
+		compoundViewer.AddViewer(errViewer)
+	}
+	return compoundViewer
 
 }
 

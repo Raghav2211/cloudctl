@@ -70,18 +70,17 @@ func (f bucketListFetcher) Fetch() interface{} {
 func (f bucketObjectsFetcher) Fetch() interface{} {
 	output := []*bucketObjectOutput{}
 
-	objectsPtr, err := fetchBucketObjects(f.bucketName, f.objectPrefix, f.maxKeys, f.client)
+	objectsPtr, errInfo := fetchBucketObjects(f.bucketName, f.objectPrefix, f.maxKeys, f.client)
 
 	for _, o := range *objectsPtr {
 		output = append(output, newBucketObjectOutput(o, f.tz))
 	}
-	if err != nil {
-		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
-		return &bucketObjectListOutput{err: errorInfo}
+	if errInfo != nil {
+		return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output, err: errInfo}
 	}
 	if len(output) == 0 {
 		errorInfo := aws.NewErrorInfo(NoObjectFound(f.bucketName), viewer.INFO, nil)
-		return &bucketObjectListOutput{err: errorInfo}
+		return &bucketObjectListOutput{bucketName: &f.bucketName, err: errorInfo}
 	}
 	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output}
 }
@@ -161,12 +160,15 @@ func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
 	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary, err: nil}
 }
 
-func fetchBucketObjects(bucketName string, objectPrefix *string, maxKeys int64, client *aws.Client) (*[]*s3.Object, error) {
+func fetchBucketObjects(bucketName string, objectPrefix *string, maxKeys int64, client *aws.Client) (*[]*s3.Object, *aws.ErrorInfo) {
 
-	var fetch func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) error
+	var fetch func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) *aws.ErrorInfo
 
-	fetch = func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) error {
+	fetch = func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) *aws.ErrorInfo {
 		if remainingKeys == 0 { // terminate condition
+			if marker != nil {
+				return aws.NewErrorInfo(BucketContainMoreObject(bucketName, maxKeys), viewer.INFO, nil)
+			}
 			return nil
 		}
 
@@ -178,13 +180,14 @@ func fetchBucketObjects(bucketName string, objectPrefix *string, maxKeys int64, 
 
 		apiOutput, err := client.S3.ListObjects(input)
 		if err != nil {
-			return err
+			return aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
 		}
+		apiOutputLen := len(apiOutput.Contents)
 		*objectsPtr = append(*objectsPtr, apiOutput.Contents...)
 		if *apiOutput.IsTruncated {
-			marker = apiOutput.Contents[len(apiOutput.Contents)-1].Key
-			remainingKeys := remainingKeys - int64(len(*objectsPtr))
-			fetch(bucketName, objectPrefix, remainingKeys, objectsPtr, marker, client)
+			marker = apiOutput.Contents[apiOutputLen-1].Key
+			remainingKeys := remainingKeys - int64(apiOutputLen)
+			return fetch(bucketName, objectPrefix, remainingKeys, objectsPtr, marker, client)
 		}
 		return nil
 	}

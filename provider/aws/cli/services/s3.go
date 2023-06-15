@@ -12,7 +12,7 @@ type listCmd struct {
 
 type listBucketObjectsCmd struct {
 	ObjectPrefix  *string `name:"prefix" help:"Bucket Object prefix"`
-	MaxKeysReturn int64   `name:"max-keys" default:"100" help:"Number of bucket objects return | Default value is 100"`
+	MaxKeysReturn int64   `name:"max-keys" default:"1000" help:"Number of bucket objects return | Default value is 1000"`
 	BucketName    string  `name:"name" arg:"required" help:"Bucket name"`
 }
 

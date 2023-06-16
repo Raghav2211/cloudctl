@@ -125,6 +125,11 @@ func instanceInfoViewer(o interface{}) viewer.Viewer {
 	return cTviewer
 }
 
+func ec2StatisticsViewer(o interface{}) viewer.Viewer {
+	// fmt.Println("data  ", o)
+	return &viewer.CompoundViewer{}
+}
+
 func renderInstanceSummary(o *instanceSummary) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()

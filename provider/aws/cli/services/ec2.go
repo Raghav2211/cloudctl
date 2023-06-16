@@ -3,7 +3,6 @@ package services
 import (
 	"cloudctl/provider/aws/cli/globals"
 	"cloudctl/provider/aws/services/ec2"
-	"log"
 )
 
 type eC2ListCmd struct {
@@ -20,12 +19,16 @@ type instanceDefinitionCmd struct {
 	Id string `name:"name" arg:"required"`
 }
 
-type EC2Command struct {
-	List               eC2ListCmd            `name:"ls" cmd:"" help:"List ec2 instances"`
-	InstacneDefinition instanceDefinitionCmd `name:"def" cmd:"" help:"Get ec2 instance definition"`
+type ec2DescribeStatisticsCmd struct {
 }
 
-func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
+type EC2Command struct {
+	List               eC2ListCmd               `name:"ls" cmd:"" help:"List ec2 instances"`
+	InstacneDefinition instanceDefinitionCmd    `name:"def" cmd:"" help:"Get ec2 instance definition"`
+	DescribeStatistics ec2DescribeStatisticsCmd `name:"stats" cmd:"" help:"Get ec2 instance(s) statistics"`
+}
+
+func (cmd eC2ListCmd) Run(globals *globals.CLIFlag) error {
 
 	filters := []ec2.InstanceListFilterOptFunc{
 		ec2.WithAvailabilityZone(cmd.AvailabilityZones),
@@ -51,9 +54,17 @@ func (cmd *eC2ListCmd) Run(globals *globals.CLIFlag) error {
 
 }
 
-func (cmd *instanceDefinitionCmd) Run(globals *globals.CLIFlag) error {
-	log.Default().Println("get definition for :", cmd.Id)
-	icmd := ec2.NewinstanceDescribeCommandExecutor(globals, cmd.Id)
+func (cmd instanceDefinitionCmd) Run(globals *globals.CLIFlag) error {
+	icmd := ec2.NewInstanceDescribeCommandExecutor(globals, cmd.Id)
+	err := icmd.Execute()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd ec2DescribeStatisticsCmd) Run(globals *globals.CLIFlag) error {
+	icmd := ec2.NewEC2StatisticsDescribeCommandExecutor(globals)
 	err := icmd.Execute()
 	if err != nil {
 		return err

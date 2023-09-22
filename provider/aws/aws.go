@@ -7,6 +7,7 @@ import (
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/cloudwatch"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
@@ -29,6 +30,7 @@ var (
 type Client struct {
 	EC2          *ec2.EC2
 	S3           *s3.S3
+	Cloudwatch   *cloudwatch.CloudWatch
 	S3Downloader *s3manager.Downloader
 }
 
@@ -37,6 +39,7 @@ func NewClient(profile, region string, debug bool) (client *Client) {
 	client = &Client{
 		EC2:          ec2.New(session),
 		S3:           s3.New(session),
+		Cloudwatch:   cloudwatch.New(session),
 		S3Downloader: s3manager.NewDownloader(session),
 	}
 	return

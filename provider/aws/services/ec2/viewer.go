@@ -77,6 +77,13 @@ var (
 		"deleteOnTermination",
 		"securityGroups",
 	}
+	instanceStatisticsTableHeader = viewer.Row{
+		"instanceId",
+		"Minimum",
+		"Average",
+		"Maximum",
+		"Status",
+	}
 )
 
 func instanceListViewer(o interface{}) viewer.Viewer {
@@ -126,8 +133,22 @@ func instanceInfoViewer(o interface{}) viewer.Viewer {
 }
 
 func ec2StatisticsViewer(o interface{}) viewer.Viewer {
-	// fmt.Println("data  ", o)
-	return &viewer.CompoundViewer{}
+	data := o.(*instanceStatisticsListOutput)
+	tViewer := viewer.NewTableViewer()
+	tViewer.AddHeader(instanceStatisticsTableHeader)
+	tViewer.SetTitle("Statistics")
+
+	for _, stats := range data.stats {
+		tViewer.AddRow(viewer.Row{
+			*stats.instanceId,
+			*stats.Minimum,
+			*stats.Average,
+			*stats.Maximum,
+			stats.CPUStatus,
+		})
+	}
+	// return tViewer
+	return viewer.NewTableViewer()
 }
 
 func renderInstanceSummary(o *instanceSummary) *viewer.TableViewer {

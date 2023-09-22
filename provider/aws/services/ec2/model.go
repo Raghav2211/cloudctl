@@ -10,9 +10,32 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
+type CPUUtilizationStatus string
+
 const (
-	NO_VALUE string = "-"
+	NO_VALUE     string               = "-"
+	CPU_LOW      CPUUtilizationStatus = "Low"
+	CPU_MODERATE CPUUtilizationStatus = "Moderate"
+	CPU_HIGH     CPUUtilizationStatus = "High"
 )
+
+type instanceStatisticsOutput struct {
+	instanceId *string
+
+	Average *float64
+	Maximum *float64
+	Minimum *float64
+
+	CPUStatus CPUUtilizationStatus
+	// Timestamp *time.Time // time between start to end
+
+	apiError *aws.ErrorInfo
+}
+
+type instanceStatisticsListOutput struct {
+	stats    []instanceStatisticsOutput
+	apiError *aws.ErrorInfo
+}
 
 type ingressRule struct {
 	portRange *string

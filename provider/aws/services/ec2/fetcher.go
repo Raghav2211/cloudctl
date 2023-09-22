@@ -59,7 +59,6 @@ func (f instanceDefinitionFetcher) Fetch() interface{} {
 }
 
 func (f statisticsFetcher) Fetch() interface{} {
-	fmt.Println("in statisticsFetcher")
 	instanceListFetcher := &instanceListFetcher{
 		client: f.client,
 		tz:     f.tz,
@@ -67,46 +66,35 @@ func (f statisticsFetcher) Fetch() interface{} {
 	}
 
 	output := instanceListFetcher.Fetch().(*instanceListOutput)
+	if output.err != nil {
+		return &instanceStatisticsListOutput{apiError: ctlaws.NewErrorInfo(output.err.Err, viewer.INFO, nil)}
+	}
 	runningInstances := output.instancesByState["running"]
 	runningInstancesLen := len(runningInstances)
 	if runningInstancesLen == 0 {
-		return NoInstanceFound()
+		return &instanceStatisticsListOutput{apiError: ctlaws.NewErrorInfo(NoInstanceFound(), viewer.INFO, nil)}
 	}
 
 	wg := new(sync.WaitGroup)
 	wg.Add(runningInstancesLen)
 
-	resuts := []*cloudwatch.GetMetricStatisticsOutput{}
+	instancesStatsOutput := []instanceStatisticsOutput{}
+
 	currentTime := time.Now()
-	startTime := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day()-15, 00, 00, 00, 00, currentTime.Location())
-	startTimeInUnix := startTime.Unix()
+	startTime := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day()-2, 00, 00, 00, 00, currentTime.Location())
 
-	fmt.Println("startTimeInUnix ", startTimeInUnix)
-
-	for _, instance := range runningInstances {
-		statsInput := cloudwatch.GetMetricStatisticsInput{
-			Dimensions: []*cloudwatch.Dimension{
-				{
-					Name:  aws.String("InstanceId"),
-					Value: aws.String(*instance.id),
-				},
-			},
-			MetricName: aws.String("CPUUtilization"),
-			Namespace:  aws.String("AWS/EC2"),
-			Period:     aws.Int64(300),
-			Statistics: []*string{aws.String("Average"), aws.String("Maximum"), aws.String("Minimum")},
-			StartTime:  &startTime,
-			EndTime:    &currentTime,
-		}
+	for _, v := range runningInstances {
+		instance := v
 		go func() {
 			defer wg.Done()
-			fmt.Println("fetching for ", *instance.id)
-			result, _ := f.client.Cloudwatch.GetMetricStatistics(&statsInput)
-			resuts = append(resuts, result)
+			stats := fetchInstanceStatistics(*instance.id, startTime, currentTime, f.client)
+			instancesStatsOutput = append(instancesStatsOutput, *stats)
 		}()
 	}
 	wg.Wait()
-	return resuts
+	return &instanceStatisticsListOutput{
+		stats: instancesStatsOutput,
+	}
 }
 
 func fetchInstanceList(client *ctlaws.Client, instanceListFilter InstanceListFilter) (*[]*ec2.Instance, error) {
@@ -241,4 +229,75 @@ func fetchIngressEgressRuleSummary(enis []*ec2.InstanceNetworkInterface, client 
 	}
 
 	return &instanceIngressEgressRuleSummary{ingressRules: ingressRules, egressRules: egressRules}
+}
+
+func fetchInstanceStatistics(instanceId string, startTime, currentTime time.Time, client *ctlaws.Client) *instanceStatisticsOutput {
+	statsInput := cloudwatch.GetMetricStatisticsInput{
+		Dimensions: []*cloudwatch.Dimension{
+			{
+				Name:  aws.String("InstanceId"),
+				Value: aws.String(instanceId),
+			},
+		},
+		MetricName: aws.String("CPUUtilization"),
+		Namespace:  aws.String("AWS/EC2"),
+		Period:     aws.Int64(300),
+		Statistics: []*string{aws.String("Average"), aws.String("Maximum"), aws.String("Minimum")},
+		StartTime:  &startTime,
+		EndTime:    &currentTime,
+	}
+	result, err := client.Cloudwatch.GetMetricStatistics(&statsInput)
+	if err != nil {
+		return &instanceStatisticsOutput{apiError: ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)}
+	}
+	// fmt.Println("result ", result)
+
+	var min float64 = 1.7e+308
+	var max float64 = 0.0
+	var total float64 = 0.0
+
+	freq := map[string]int{}
+
+	for _, metricStats := range result.Datapoints {
+
+		if instanceId == "i-0f20c6907aa0e6b6f" {
+			fmt.Println("metricStats == ", metricStats)
+		}
+		// fmt.Println("Minimum == ", *metricStats.Minimum)
+		if *metricStats.Minimum < min {
+			min = *metricStats.Minimum
+		}
+		if *metricStats.Maximum > max {
+			max = *metricStats.Maximum
+		}
+		total = total + *metricStats.Average
+
+		if *metricStats.Minimum <= 45 || *metricStats.Average <= 45 || *metricStats.Maximum <= 45 {
+			freq[string(CPU_LOW)] = freq[string(CPU_LOW)] + 1
+		}
+		if (*metricStats.Minimum > 45 && *metricStats.Minimum <= 75) || (*metricStats.Average > 45 && *metricStats.Average <= 75) || (*metricStats.Maximum > 45 && *metricStats.Maximum <= 75) {
+			freq[string(CPU_MODERATE)] = freq[string(CPU_MODERATE)] + 1
+		}
+		if *metricStats.Minimum > 75 || *metricStats.Average > 75 || *metricStats.Maximum > 75 {
+			freq[string(CPU_HIGH)] = freq[string(CPU_HIGH)] + 1
+		}
+	}
+	avg := total / float64(len(result.Datapoints))
+
+	status := CPU_LOW
+	if avg > 45 && avg <= 75 {
+		status = CPU_MODERATE
+	}
+	if avg > 75 {
+		status = CPU_HIGH
+	}
+
+	fmt.Println("freq for ", instanceId, "=", freq, " datapointlen= ", len(result.Datapoints))
+	return &instanceStatisticsOutput{
+		instanceId: &instanceId,
+		Average:    &avg,
+		Maximum:    &max,
+		Minimum:    &min,
+		CPUStatus:  status,
+	}
 }

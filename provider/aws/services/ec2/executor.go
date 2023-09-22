@@ -5,7 +5,6 @@ import (
 	"cloudctl/provider/aws"
 	"cloudctl/provider/aws/cli/globals"
 	"cloudctl/time"
-	"fmt"
 	"strings"
 )
 
@@ -35,7 +34,6 @@ func NewInstanceDescribeCommandExecutor(flag *globals.CLIFlag, instanceId string
 }
 
 func NewEC2StatisticsDescribeCommandExecutor(flag *globals.CLIFlag) *executor.CommandExecutor {
-	fmt.Println("NewEC2StatisticsDescribeCommandExecutor")
 	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
 	return &executor.CommandExecutor{
 		Fetcher: &statisticsFetcher{

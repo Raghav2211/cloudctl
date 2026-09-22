@@ -1,6 +1,7 @@
 package ec2
 
 import (
+	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"fmt"
 	"strings"
@@ -86,14 +87,9 @@ var (
 	}
 )
 
-func instanceListViewer(o interface{}) viewer.Viewer {
-	data := o.(*instanceListOutput)
-
-	if data.err != nil {
-		erroViewer := viewer.NewErrorViewer()
-		erroViewer.SetErrorType(data.err.ErrorType)
-		erroViewer.SetErrorMessage(data.err.Err.Error())
-		return erroViewer
+func instanceListViewer(data *instanceListOutput, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
 	}
 
 	compoundViewer := viewer.NewCompoundViewer()
@@ -101,6 +97,11 @@ func instanceListViewer(o interface{}) viewer.Viewer {
 		tViewer := viewer.NewTableViewer()
 		tViewer.AddHeader(instanceListTableHeader)
 		tViewer.SetTitle(fmt.Sprintf("Instances[%s]", state))
+
+		// Apply default enhanced styling (now truly generic)
+		style := viewer.DefaultTableStyle()
+		tViewer.SetStyle(style)
+
 		for _, instance := range instanceSummaries {
 			tViewer.AddRow(viewer.Row{
 				*instance.id,
@@ -118,11 +119,12 @@ func instanceListViewer(o interface{}) viewer.Viewer {
 	return compoundViewer
 }
 
-func instanceInfoViewer(o interface{}) viewer.Viewer {
+func instanceInfoViewer(instance *instanceDefinition, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
+	}
+
 	cTviewer := viewer.NewCompoundViewer()
-
-	instance := o.(*instanceDefinition)
-
 	cTviewer.AddViewer(renderInstanceSummary(instance.summary))
 	cTviewer.AddViewer(renderInstanceDetails(instance.detail))
 	cTviewer.AddViewers(renderInstanceRulesSummary(instance.ruleSummary))
@@ -132,13 +134,26 @@ func instanceInfoViewer(o interface{}) viewer.Viewer {
 	return cTviewer
 }
 
-func ec2StatisticsViewer(o interface{}) viewer.Viewer {
-	data := o.(*instanceStatisticsListOutput)
+func ec2StatisticsViewer(data *instanceStatisticsListOutput, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
+	}
+
 	tViewer := viewer.NewTableViewer()
 	tViewer.AddHeader(instanceStatisticsTableHeader)
 	tViewer.SetTitle("Statistics")
 
 	for _, stats := range data.stats {
+		if stats.apiError != nil {
+			tViewer.AddRow(viewer.Row{
+				*stats.instanceId,
+				"-",
+				"-",
+				"-",
+				stats.apiError.Err.Error(),
+			})
+			continue
+		}
 		tViewer.AddRow(viewer.Row{
 			*stats.instanceId,
 			*stats.Minimum,
@@ -147,8 +162,7 @@ func ec2StatisticsViewer(o interface{}) viewer.Viewer {
 			stats.CPUStatus,
 		})
 	}
-	// return tViewer
-	return viewer.NewTableViewer()
+	return tViewer
 }
 
 func renderInstanceSummary(o *instanceSummary) *viewer.TableViewer {
@@ -191,10 +205,7 @@ func renderInstanceDetails(o *instanceDetail) *viewer.TableViewer {
 func renderInstanceRulesSummary(summary *instanceIngressEgressRuleSummary) []viewer.Viewer {
 	viewers := []viewer.Viewer{}
 	if summary.apiError != nil {
-		errorViewer := viewer.NewErrorViewer()
-		errorViewer.SetErrorMessage(summary.apiError.Err.Error())
-		errorViewer.SetErrorType(summary.apiError.ErrorType)
-		viewers = append(viewers, errorViewer)
+		viewers = append(viewers, ctlaws.ErrorView(summary.apiError))
 	} else {
 		viewers = append(viewers, renderInstanceIngressRules(summary.ingressRules))
 		viewers = append(viewers, renderInstanceEgressRules(summary.egressRules))
@@ -237,7 +248,10 @@ func renderInstanceEgressRules(rules []*egressRule) *viewer.TableViewer {
 	return tViewer
 }
 
-func renderInstanceVolumeSummary(volumesSummary *instanceVolumeSummary) *viewer.TableViewer {
+func renderInstanceVolumeSummary(volumesSummary *instanceVolumeSummary) viewer.Viewer {
+	if volumesSummary.apiError != nil {
+		return ctlaws.ErrorView(volumesSummary.apiError)
+	}
 
 	tViewer := viewer.NewTableViewer()
 	tViewer.SetTitle("Volumes")
@@ -291,4 +305,28 @@ func renderInstanceNetworkSummary(instanceNetworkinterfaces []*instanceNetworkin
 	}
 
 	return tViewer
+}
+
+func sgExplainViewer(data *sgExplanation, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
+	}
+
+	compound := viewer.NewCompoundViewer()
+	compound.AddViewer(viewer.FuncViewer(func() {
+		fmt.Printf("=== AI Summary for %s (Hypothesis — verify against the raw rules below) ===\n", *data.sgId)
+		if data.aiSummary != "" {
+			fmt.Println(data.aiSummary)
+		} else {
+			reason := data.aiSummaryUnavailable
+			if reason == "" {
+				reason = "not attempted"
+			}
+			fmt.Printf("summary unavailable: %s\n", reason)
+		}
+		fmt.Println()
+	}))
+	compound.AddViewer(renderInstanceIngressRules(data.ingressRules))
+	compound.AddViewer(renderInstanceEgressRules(data.egressRules))
+	return compound
 }

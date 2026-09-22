@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type BucketListFilterOptFunc func(*BucketListFilter)
@@ -14,7 +14,7 @@ type BucketListFilter struct {
 	bucketNameString   *string
 }
 
-func (f *BucketListFilter) applyCustomFilter(bucket *s3.Bucket) bool {
+func (f *BucketListFilter) applyCustomFilter(bucket types.Bucket) bool {
 	if f.bucketNameString == nil && f.creationDateString == nil {
 		return true
 	}

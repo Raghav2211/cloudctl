@@ -6,13 +6,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type bucketOjectsDownloadSummary struct {
 	bucketName             string
 	objectsDownloadSummary []*objectDownloadSummary
-	err                    *aws.ErrorInfo
 }
 
 type objectDownloadSummary struct {
@@ -35,13 +34,14 @@ type bucketObjectOutput struct {
 }
 type bucketListOutput struct {
 	buckets []*bucketOutput
-	err     *aws.ErrorInfo
 }
 
+// notice carries a non-fatal INFO note (e.g. the bucket has more objects than
+// the requested max-keys) that should render alongside otherwise-valid objects.
 type bucketObjectListOutput struct {
 	bucketName *string
 	objects    []*bucketObjectOutput
-	err        *aws.ErrorInfo
+	notice     *aws.ErrorInfo
 }
 
 type bucketDefinition struct {
@@ -56,20 +56,27 @@ type bucketDefinition struct {
 	encryptionConfigAPIError error
 	lifecycle                *interface{}
 	lifeCycleAPIError        error
+
+	// aiSummary is a Hypothesis-grade prose summary generated from the
+	// Fact-tagged evidence gathered above (see fetcher.go). It is additive,
+	// never a replacement for the raw data below — if empty,
+	// aiSummaryUnavailable explains why (AI is never a hard dependency).
+	aiSummary            string
+	aiSummaryUnavailable string
 }
 
-func newBucketOutput(bucket *s3.Bucket, tz *ctltime.Timezone) *bucketOutput {
+func newBucketOutput(bucket types.Bucket, tz *ctltime.Timezone) *bucketOutput {
 	return &bucketOutput{
 		name:         bucket.Name,
 		creationDate: tz.AdaptTimezone(bucket.CreationDate),
 	}
 }
 
-func newBucketObjectOutput(o *s3.Object, tz *ctltime.Timezone) *bucketObjectOutput {
+func newBucketObjectOutput(o types.Object, tz *ctltime.Timezone) *bucketObjectOutput {
 	return &bucketObjectOutput{
 		key:          o.Key,
 		sizeInBytes:  o.Size,
-		storageClass: o.StorageClass,
+		storageClass: (*string)(&o.StorageClass.Values()[0]), // TODO : handle array
 		lastModified: tz.AdaptTimezone(o.LastModified),
 	}
 }
@@ -137,7 +144,30 @@ func (o *bucketDefinition) SetLifeCycleError(err error) *bucketDefinition {
 	return o
 }
 
+func (o *bucketDefinition) SetAISummary(summary string) *bucketDefinition {
+	o.aiSummary = summary
+	return o
+}
+
+func (o *bucketDefinition) SetAISummaryUnavailable(reason string) *bucketDefinition {
+	o.aiSummaryUnavailable = reason
+	return o
+}
+
 func (o bucketDefinition) Pretty() {
+	fmt.Println("=== AI Summary (Hypothesis — verify against the raw data below) ===")
+	if o.aiSummary != "" {
+		fmt.Println(o.aiSummary)
+	} else {
+		reason := o.aiSummaryUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		fmt.Printf("summary unavailable: %s\n", reason)
+	}
+	fmt.Println()
+	fmt.Println("=== Raw Data ===")
+
 	if o.encryptionConfigAPIError != nil {
 		fmt.Println("encryptionConfigAPIError", o.encryptionConfigAPIError)
 	} else {

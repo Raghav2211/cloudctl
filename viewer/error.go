@@ -7,6 +7,7 @@ import (
 type ErrorType color.Attribute
 
 const (
+	DEBUG ErrorType = ErrorType(color.FgBlue)
 	WARN  ErrorType = ErrorType(color.FgYellow)
 	INFO  ErrorType = ErrorType(color.FgBlue)
 	ERROR ErrorType = ErrorType(color.FgRed)
@@ -37,6 +38,8 @@ func (e *ErrorViewer) View() {
 		boldColor.Println("WARNING!")
 	} else if e.errorType == ERROR {
 		boldColor.Println("ERROR!")
+	} else if e.errorType == DEBUG {
+		boldColor.Println("DEBUG!")
 	} else {
 		boldColor.Println("INFO!")
 	}

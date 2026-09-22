@@ -11,6 +11,6 @@ func NoObjectFound(bucketName string) error {
 func NoObjectFoundWithGivenPrefix(bucketname, prefix string) error {
 	return fmt.Errorf("no object found for bucket %s with prefix %s", bucketname, prefix)
 }
-func BucketContainMoreObject(bucketName string, maxKeys int64) error {
+func BucketContainMoreObject(bucketName string, maxKeys int32) error {
 	return fmt.Errorf("%s contains more objects than the maximum key limit of %d", bucketName, maxKeys)
 }

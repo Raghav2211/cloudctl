@@ -1,9 +1,14 @@
 package s3
 
 import (
+	"cloudctl/ai"
+	"cloudctl/evidence"
 	"cloudctl/provider/aws"
+	"cloudctl/provider/aws/cli/globals"
 	itime "cloudctl/time"
 	"cloudctl/viewer"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,48 +16,48 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"log"
+
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
 
 type bucketListFetcher struct {
-	client *aws.Client
-	filter *BucketListFilter
-	tz     *itime.Timezone
+	client         listBucketsAPI
+	requestTimeout globals.RequestTimeout
+	filter         *BucketListFilter
+	tz             *itime.Timezone
 }
 
 type bucketObjectsFetcher struct {
-	client *aws.Client
+	client *s3.Client
 	// fetch all objects for provided bucket
 	bucketName   string
 	objectPrefix *string
-	maxKeys      int64
+	maxKeys      int32
 	tz           *itime.Timezone
 }
 
 type bucketConfigurationFetcher struct {
-	client *aws.Client
+	client bucketConfigurationAPI
 	// fetch configuration for provided bucket
 	bucketName string
 }
+
 type bucketObjectsDownloadFetcher struct {
-	client     *aws.Client
+	client     *s3.Client
+	downloader *manager.Downloader
 	bucketName string
 	key        string
 	path       string
 	recursive  bool
 }
 
-func (f bucketListFetcher) Fetch() interface{} {
-
-	apiOutput, err := f.client.S3.ListBuckets(&s3.ListBucketsInput{})
+func (f bucketListFetcher) Fetch(ctx context.Context) (*bucketListOutput, error) {
+	apiOutput, err := listBucket(ctx, f.client, f.requestTimeout)
 	if err != nil {
-		errorInfo := aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
-		return &bucketListOutput{err: errorInfo}
-	}
-	if len(apiOutput.Buckets) == 0 {
-		errorInfo := &aws.ErrorInfo{Err: NoBucketFound(), ErrorType: viewer.INFO}
-		return &bucketListOutput{err: errorInfo}
+		return nil, err
 	}
 	buckets := []*bucketOutput{}
 	for _, o := range apiOutput.Buckets {
@@ -60,144 +65,216 @@ func (f bucketListFetcher) Fetch() interface{} {
 			buckets = append(buckets, newBucketOutput(o, f.tz))
 		}
 	}
-	// default sort(asc) by creation darte
+	// default sort(asc) by creation date
 	sort.Slice(buckets, func(i, j int) bool {
 		return buckets[i].creationDate.Before(*buckets[j].creationDate)
 	})
-	return &bucketListOutput{buckets: buckets}
+	return &bucketListOutput{buckets: buckets}, nil
 }
 
-func (f bucketObjectsFetcher) Fetch() interface{} {
+func (f bucketObjectsFetcher) Fetch(ctx context.Context) (*bucketObjectListOutput, error) {
+	objects, notice, err := fetchBucketObjects(ctx, f.bucketName, f.objectPrefix, f.maxKeys, f.client)
+	if err != nil {
+		return nil, err
+	}
 	output := []*bucketObjectOutput{}
-
-	objectsPtr, errInfo := fetchBucketObjects(f.bucketName, f.objectPrefix, f.maxKeys, f.client)
-
-	for _, o := range *objectsPtr {
+	for _, o := range objects {
 		output = append(output, newBucketObjectOutput(o, f.tz))
 	}
-	if errInfo != nil {
-		return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output, err: errInfo}
-	}
-	if len(output) == 0 {
-		errorInfo := aws.NewErrorInfo(NoObjectFound(f.bucketName), viewer.INFO, nil)
-		return &bucketObjectListOutput{bucketName: &f.bucketName, err: errorInfo}
-	}
-	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output}
+	return &bucketObjectListOutput{bucketName: &f.bucketName, objects: output, notice: notice}, nil
 }
 
-func (f bucketConfigurationFetcher) Fetch() interface{} {
+type policyResult struct {
+	data *s3.GetBucketPolicyOutput
+	err  error
+}
+type versionResult struct {
+	data *s3.GetBucketVersioningOutput
+	err  error
+}
+type tagsResult struct {
+	data *s3.GetBucketTaggingOutput
+	err  error
+}
+type encryptionResult struct {
+	data *s3.GetBucketEncryptionOutput
+	err  error
+}
+type lifecycleResult struct {
+	data *s3.GetBucketLifecycleConfigurationOutput
+	err  error
+}
 
+// Fetch gathers a bucket's policy/versioning/tags/encryption/lifecycle
+// concurrently. Each dimension is fetched by its own goroutine into its own
+// single-result channel (data and error together, not two separate
+// channels) so there is exactly one value to receive per dimension — no
+// ambiguity between "the real result arrived" and "the channel was closed
+// with nothing in it" for select to race between.
+func (f bucketConfigurationFetcher) Fetch(ctx context.Context) (*bucketDefinition, error) {
 	definition := &bucketDefinition{}
 	definition.SetBucketName(f.bucketName)
 
-	wg := new(sync.WaitGroup)
-	wg.Add(5)
+	policyCh := make(chan policyResult, 1)
+	versionCh := make(chan versionResult, 1)
+	tagsCh := make(chan tagsResult, 1)
+	encryptionCh := make(chan encryptionResult, 1)
+	lifecycleCh := make(chan lifecycleResult, 1)
 
 	go func() {
-		defer wg.Done()
-		data := getBucketPolicy(&f.bucketName, f.client, definition)
-		if data != nil {
-			definition.SetPolicy(data)
-		}
+		data, err := getBucketPolicy(ctx, &f.bucketName, f.client)
+		policyCh <- policyResult{data: data, err: err}
 	}()
 	go func() {
-		defer wg.Done()
-		data := getBucketVersionConfig(&f.bucketName, f.client, definition)
-		if data != nil {
-			definition.SetVersion(data)
-		}
+		data, err := getBucketVersionConfig(ctx, &f.bucketName, f.client)
+		versionCh <- versionResult{data: data, err: err}
 	}()
 	go func() {
-		defer wg.Done()
-		data := getBucketTags(&f.bucketName, f.client, definition)
-		if data != nil {
-			definition.SetTags(data)
-		}
+		data, err := getBucketTags(ctx, &f.bucketName, f.client)
+		tagsCh <- tagsResult{data: data, err: err}
 	}()
 	go func() {
-		defer wg.Done()
-		data := getBucketencryptionConfig(&f.bucketName, f.client, definition)
-		if data != nil {
-			definition.SetEncryptionConfig(data)
-		}
+		data, err := getBucketencryptionConfig(ctx, &f.bucketName, f.client)
+		encryptionCh <- encryptionResult{data: data, err: err}
 	}()
 	go func() {
-		defer wg.Done()
-		data := getBucketLifecycleConfig(&f.bucketName, f.client, definition)
-		if data != nil {
-			definition.SetLifeCycle(data)
-		}
+		data, err := getBucketLifecycleConfig(ctx, &f.bucketName, f.client)
+		lifecycleCh <- lifecycleResult{data: data, err: err}
 	}()
-	wg.Wait()
-	return definition
+
+	// Local typed captures alongside the *interface{}-boxed fields set on
+	// definition, so evidence can be built from concrete types below
+	// without unboxing them again. Each channel is read exactly once, and
+	// definition is only ever touched from this goroutine, so no mutex is
+	// needed here.
+	var policyData *s3.GetBucketPolicyOutput
+	var versionData *s3.GetBucketVersioningOutput
+	var tagsData *s3.GetBucketTaggingOutput
+	var encryptionData *s3.GetBucketEncryptionOutput
+	var lifecycleData *s3.GetBucketLifecycleConfigurationOutput
+
+	if r := <-policyCh; r.err != nil {
+		definition.SetPolicyAPIError(r.err)
+	} else {
+		definition.SetPolicy(r.data)
+		policyData = r.data
+	}
+	if r := <-versionCh; r.err != nil {
+		definition.SetVersionAPIError(r.err)
+	} else {
+		definition.SetVersion(r.data)
+		versionData = r.data
+	}
+	if r := <-tagsCh; r.err != nil {
+		definition.SetTagsAPIError(r.err)
+	} else {
+		definition.SetTags(r.data)
+		tagsData = r.data
+	}
+	if r := <-encryptionCh; r.err != nil {
+		definition.SetEncryptionConfigAPIError(r.err)
+	} else {
+		definition.SetEncryptionConfig(r.data)
+		encryptionData = r.data
+	}
+	if r := <-lifecycleCh; r.err != nil {
+		definition.SetLifeCycleError(r.err)
+	} else {
+		definition.SetLifeCycle(r.data)
+		lifecycleData = r.data
+	}
+
+	// AI narration is additive: a failed or unreachable Summarize call never
+	// fails Fetch itself, it only leaves aiSummaryUnavailable set (ADR-010).
+	facts := bucketDefinitionEvidence(f.bucketName, policyData, versionData, tagsData, encryptionData, lifecycleData)
+	definition.applyAISummary(ctx, ai.NewClientFromEnv(), facts)
+
+	return definition, nil
 }
 
-func (f bucketObjectsDownloadFetcher) Fetch() interface{} {
-	objectDownloadSummaryChan := make(chan *objectDownloadSummary)
+// applyAISummary sets aiSummary or aiSummaryUnavailable from the given
+// evidence, never returning an error — a failed or unreachable Summarize
+// call must never fail the surrounding Fetch (ADR-010). Split out from
+// Fetch so this exact integration point (evidence in, AI client behavior,
+// bucketDefinition fields out) is directly testable without a real AWS call.
+func (definition *bucketDefinition) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
+	log.Printf("Evidence, %v", facts)
+	if len(facts) == 0 {
+		definition.SetAISummaryUnavailable("no evidence could be gathered (all fetches failed)")
+		return
+	}
+	summary, err := client.Summarize(ctx, facts)
+	if err != nil {
+		definition.SetAISummaryUnavailable(err.Error())
+		return
+	}
+	definition.SetAISummary(summary)
+}
+
+func (f bucketObjectsDownloadFetcher) Fetch(ctx context.Context) (*bucketOjectsDownloadSummary, error) {
+	objectDownloadSummaryChan := make(chan *objectDownloadSummary, 100) // Buffered channel
 	objectsDownloadSummary := []*objectDownloadSummary{}
+
+	// Ensure channel is closed after all operations complete
 	defer close(objectDownloadSummaryChan)
+
 	if f.recursive {
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &f.bucketName
 		input.Prefix = &f.key
-		apiOutput, err := f.client.S3.ListObjects(input)
+		apiOutput, err := f.client.ListObjects(ctx, input)
 		if err != nil {
-			return &bucketOjectsDownloadSummary{err: aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)}
+			return nil, aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
 		}
 		if len(apiOutput.Contents) == 0 {
-			return &bucketOjectsDownloadSummary{err: aws.NewErrorInfo(NoObjectFoundWithGivenPrefix(f.bucketName, f.key), viewer.WARN, nil)}
+			return nil, aws.NewErrorInfo(NoObjectFoundWithGivenPrefix(f.bucketName, f.key), viewer.WARN, nil)
 		}
+
+		// Use WaitGroup to ensure all downloads complete
+		var wg sync.WaitGroup
+		wg.Add(len(apiOutput.Contents))
+
+		// Launch download goroutines
 		for _, object := range apiOutput.Contents {
-			go downloadObject(f.bucketName, *object.Key, f.path, f.client, objectDownloadSummaryChan)
+			go func(objKey string) {
+				defer wg.Done()
+				downloadObject(ctx, f.bucketName, objKey, f.path, f.downloader, objectDownloadSummaryChan)
+			}(*object.Key)
 		}
+
+		// Wait for all downloads to complete
+		wg.Wait()
+
+		// Collect all results, bounded by one shared 30s deadline for the
+		// whole collection phase (not 30s per remaining item).
+		collectDeadline := time.After(30 * time.Second)
+	collectLoop:
 		for i := 0; i < len(apiOutput.Contents); i++ {
-			objectsDownloadSummary = append(objectsDownloadSummary, <-objectDownloadSummaryChan)
-		}
-		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary, err: nil}
-	}
-	go downloadObject(f.bucketName, f.key, f.path, f.client, objectDownloadSummaryChan)
-	objectsDownloadSummary = append(objectsDownloadSummary, <-objectDownloadSummaryChan)
-	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary, err: nil}
-}
-
-func fetchBucketObjects(bucketName string, objectPrefix *string, maxKeys int64, client *aws.Client) (*[]*s3.Object, *aws.ErrorInfo) {
-
-	var fetch func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) *aws.ErrorInfo
-
-	fetch = func(bucketName string, objectPrefix *string, remainingKeys int64, objectsPtr *[]*s3.Object, marker *string, client *aws.Client) *aws.ErrorInfo {
-		if remainingKeys == 0 { // terminate condition
-			if marker != nil {
-				return aws.NewErrorInfo(BucketContainMoreObject(bucketName, maxKeys), viewer.INFO, nil)
+			select {
+			case summary := <-objectDownloadSummaryChan:
+				objectsDownloadSummary = append(objectsDownloadSummary, summary)
+			case <-collectDeadline:
+				break collectLoop
 			}
-			return nil
 		}
 
-		input := &s3.ListObjectsInput{}
-		input.Bucket = &bucketName
-		input.Prefix = objectPrefix
-		input.MaxKeys = &remainingKeys
-		input.Marker = marker
-
-		apiOutput, err := client.S3.ListObjects(input)
-		if err != nil {
-			return aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil)
-		}
-		apiOutputLen := len(apiOutput.Contents)
-		*objectsPtr = append(*objectsPtr, apiOutput.Contents...)
-		if *apiOutput.IsTruncated {
-			marker = apiOutput.Contents[apiOutputLen-1].Key
-			remainingKeys := remainingKeys - int64(apiOutputLen)
-			return fetch(bucketName, objectPrefix, remainingKeys, objectsPtr, marker, client)
-		}
-		return nil
+		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary}, nil
 	}
-	objects := []*s3.Object{}
-	nextMarker := "" // empty marker to start process
-	err := fetch(bucketName, objectPrefix, maxKeys, &objects, &nextMarker, client)
-	return &objects, err
+
+	// Single object download
+	go downloadObject(ctx, f.bucketName, f.key, f.path, f.downloader, objectDownloadSummaryChan)
+
+	select {
+	case summary := <-objectDownloadSummaryChan:
+		objectsDownloadSummary = append(objectsDownloadSummary, summary)
+	case <-time.After(30 * time.Second): // Timeout protection
+		return nil, aws.NewErrorInfo(fmt.Errorf("download timeout"), viewer.ERROR, nil)
+	}
+
+	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary}, nil
 }
 
-func downloadObject(bucketName, key, path string, client *aws.Client, downloadSummaryChan chan<- *objectDownloadSummary) {
+func downloadObject(ctx context.Context, bucketName, key, path string, downloader *manager.Downloader, downloadSummaryChan chan<- *objectDownloadSummary) {
 	start := time.Now()
 	downloadFileAbsPath := fmt.Sprintf("%s/%s", path, key)
 
@@ -206,72 +283,75 @@ func downloadObject(bucketName, key, path string, client *aws.Client, downloadSu
 	if _, err := os.Stat(fileDir); os.IsNotExist(err) {
 		err := os.MkdirAll(fileDir, os.ModePerm)
 		if err != nil {
-			fmt.Println("erro occur during create dir ", err)
+			fmt.Println("error occurred during create dir ", err)
 		}
 	}
 
 	file, err := os.Create(downloadFileAbsPath)
 	if err != nil {
-		defer file.Close()
-		downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(err, viewer.ERROR, nil))
-	} else {
-		numBytesWrite, err := client.S3Downloader.Download(file, &s3.GetObjectInput{
-			Bucket: &bucketName,
-			Key:    &key,
-		})
-		if err != nil {
-			downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil))
-		} else {
-			downloadSummaryChan <- newBucketObjectDownloadSummary(key, file.Name(), numBytesWrite, time.Since(start), nil)
+		if file != nil {
+			file.Close()
 		}
+		downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(err, viewer.ERROR, nil))
+		return
 	}
-}
 
-func getBucketPolicy(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketPolicyOutput {
-	res, err := client.S3.GetBucketPolicy(&s3.GetBucketPolicyInput{Bucket: bucket})
+	// Ensure file is closed after download
+	defer file.Close()
+
+	numBytesWrite, err := downloader.Download(ctx, file, &s3.GetObjectInput{
+		Bucket: &bucketName,
+		Key:    &key,
+	})
 	if err != nil {
-		errr, _ := err.(awserr.Error)
-		fmt.Println("errCode", errr.Code(), " message ", errr.Message())
-		bucketinfo.SetPolicyAPIError(err)
-		return nil
+		downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil))
+	} else {
+		downloadSummaryChan <- newBucketObjectDownloadSummary(key, file.Name(), numBytesWrite, time.Since(start), nil)
 	}
-	return res
 }
 
-func getBucketVersionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketVersioningOutput {
-	res, err := client.S3.GetBucketVersioning(&s3.GetBucketVersioningInput{Bucket: bucket})
+func getBucketPolicy(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketPolicyOutput, error) {
+	res, err := client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{Bucket: bucket})
 	if err != nil {
-		bucketinfo.SetVersionAPIError(err)
-		return nil
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			fmt.Println("errCode", apiErr.ErrorCode(), " message ", apiErr.ErrorMessage())
+		}
+		return nil, err
 	}
-	return res
+	return res, nil
 }
 
-func getBucketTags(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketTaggingOutput {
-	res, err := client.S3.GetBucketTagging(&s3.GetBucketTaggingInput{Bucket: bucket})
+func getBucketVersionConfig(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketVersioningOutput, error) {
+	res, err := client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{Bucket: bucket})
 	if err != nil {
-		bucketinfo.SetTagsAPIError(err)
-		return nil
+		return nil, err
 	}
-	return res
+	return res, nil
 }
 
-func getBucketencryptionConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketEncryptionOutput {
-	res, err := client.S3.GetBucketEncryption(&s3.GetBucketEncryptionInput{Bucket: bucket})
+func getBucketTags(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketTaggingOutput, error) {
+	res, err := client.GetBucketTagging(ctx, &s3.GetBucketTaggingInput{Bucket: bucket})
 	if err != nil {
-		bucketinfo.SetEncryptionConfigAPIError(err)
-		return nil
+		return nil, err
 	}
-	return res
+	return res, nil
 }
 
-func getBucketLifecycleConfig(bucket *string, client *aws.Client, bucketinfo *bucketDefinition) *s3.GetBucketLifecycleConfigurationOutput {
-	res, err := client.S3.GetBucketLifecycleConfiguration(&s3.GetBucketLifecycleConfigurationInput{Bucket: bucket})
+func getBucketencryptionConfig(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketEncryptionOutput, error) {
+	res, err := client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{Bucket: bucket})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func getBucketLifecycleConfig(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketLifecycleConfigurationOutput, error) {
+	res, err := client.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{Bucket: bucket})
 
 	if err != nil {
 		fmt.Println("Error message", err.Error())
-		bucketinfo.SetLifeCycleError(err)
-		return nil
+		return nil, err
 	}
-	return res
+	return res, nil
 }

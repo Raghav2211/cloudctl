@@ -1,8 +1,8 @@
 package ec2
 
 import (
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
 const (
@@ -26,15 +26,21 @@ type InstanceListFilter struct {
 	launchAt       *string
 }
 
-func (f *InstanceListFilter) applyCustomFilter(instance *ec2.Instance) bool {
+func (f *InstanceListFilter) applyCustomFilter(instance types.Instance) bool {
 	if f.hasPublicIp != nil && instance.PublicIpAddress == nil {
 		return false
 	}
 	return true
 }
 
-func (f *InstanceListFilter) requestFilters() []*ec2.Filter {
-	filters := []*ec2.Filter{}
+// requestFilters builds the AWS API-side filter list. It must return nil,
+// not an empty slice, when no filter applies — DescribeInstances rejects an
+// explicitly-empty Filters list with "InvalidRequest: The request received
+// was invalid.", distinct from simply omitting the field (confirmed live
+// against a real account: `ctl ec2 ls` with zero flags failed outright
+// until this returned nil instead of []types.Filter{}).
+func (f *InstanceListFilter) requestFilters() []types.Filter {
+	var filters []types.Filter
 	stateFilter := f.instanceStateFilter()
 	typeFilter := f.instanceTypeFilter()
 	azFilter := f.azFilter()
@@ -42,113 +48,113 @@ func (f *InstanceListFilter) requestFilters() []*ec2.Filter {
 	subnetFilter := f.subnetFilter()
 	launchAtFilter := f.launchAtFilter()
 	if stateFilter != nil {
-		filters = append(filters, stateFilter)
+		filters = append(filters, *stateFilter)
 	}
 	if typeFilter != nil {
-		filters = append(filters, typeFilter)
+		filters = append(filters, *typeFilter)
 	}
 	if azFilter != nil {
-		filters = append(filters, f.azFilter())
+		filters = append(filters, *f.azFilter())
 	}
 	if vpcFilter != nil {
-		filters = append(filters, vpcFilter)
+		filters = append(filters, *vpcFilter)
 	}
 	if subnetFilter != nil {
-		filters = append(filters, subnetFilter)
+		filters = append(filters, *subnetFilter)
 	}
 	if launchAtFilter != nil {
-		filters = append(filters, launchAtFilter)
+		filters = append(filters, *launchAtFilter)
 	}
 	// log.Default().Println("requestFilters ==> ", filters)
 	// log.Default().Println("customFilter ==> ", filters)
 	return filters
 }
 
-func (f *InstanceListFilter) instanceTypeFilter() *ec2.Filter {
+func (f *InstanceListFilter) instanceTypeFilter() *types.Filter {
 	if len(f.instanceTypes) == 0 {
 		return nil
 	}
-	instanceTypeFilterValues := []*string{}
+	instanceTypeFilterValues := []string{}
 	for i := range f.instanceTypes {
-		instanceTypeFilterValues = append(instanceTypeFilterValues, &f.instanceTypes[i])
+		instanceTypeFilterValues = append(instanceTypeFilterValues, f.instanceTypes[i])
 	}
-	filter := &ec2.Filter{
+	filter := &types.Filter{
 		Name:   aws.String(instance_type_key),
 		Values: instanceTypeFilterValues,
 	}
 	return filter
 }
 
-func (f *InstanceListFilter) instanceStateFilter() *ec2.Filter {
+func (f *InstanceListFilter) instanceStateFilter() *types.Filter {
 	if len(f.instanceStates) == 0 {
 		return nil
 	}
-	instanceStateFilterValues := []*string{}
+	instanceStateFilterValues := []string{}
 	for i := range f.instanceStates {
-		instanceStateFilterValues = append(instanceStateFilterValues, &f.instanceStates[i])
+		instanceStateFilterValues = append(instanceStateFilterValues, f.instanceStates[i])
 	}
-	filter := &ec2.Filter{
+	filter := &types.Filter{
 		Name:   aws.String(instance_state_name_key),
 		Values: instanceStateFilterValues,
 	}
 	return filter
 }
 
-func (f *InstanceListFilter) azFilter() *ec2.Filter {
+func (f *InstanceListFilter) azFilter() *types.Filter {
 	if len(f.azs) == 0 {
 		return nil
 	}
 
-	azFilterValues := []*string{}
+	azFilterValues := []string{}
 	for i := range f.azs {
-		azFilterValues = append(azFilterValues, &f.azs[i])
+		azFilterValues = append(azFilterValues, f.azs[i])
 	}
-	filter := &ec2.Filter{
+	filter := &types.Filter{
 		Name:   aws.String(az_key),
 		Values: azFilterValues,
 	}
 	return filter
 }
 
-func (f *InstanceListFilter) vpcFilter() *ec2.Filter {
+func (f *InstanceListFilter) vpcFilter() *types.Filter {
 	if len(f.vpcIds) == 0 {
 		return nil
 	}
-	vpcFilterValues := []*string{}
+	vpcFilterValues := []string{}
 	for i := range f.vpcIds {
-		vpcFilterValues = append(vpcFilterValues, &f.vpcIds[i])
+		vpcFilterValues = append(vpcFilterValues, f.vpcIds[i])
 	}
-	filter := &ec2.Filter{
+	filter := &types.Filter{
 		Name:   aws.String(vpc_id_key),
 		Values: vpcFilterValues,
 	}
 	return filter
 }
 
-func (f *InstanceListFilter) subnetFilter() *ec2.Filter {
+func (f *InstanceListFilter) subnetFilter() *types.Filter {
 	if len(f.subnetIds) == 0 {
 		return nil
 	}
-	subnetFilterValues := []*string{}
+	subnetFilterValues := []string{}
 	for i := range f.subnetIds {
-		subnetFilterValues = append(subnetFilterValues, &f.subnetIds[i])
+		subnetFilterValues = append(subnetFilterValues, f.subnetIds[i])
 	}
-	filter := &ec2.Filter{
+	filter := &types.Filter{
 		Name:   aws.String(subnet_id_key),
 		Values: subnetFilterValues,
 	}
 	return filter
 }
 
-func (f *InstanceListFilter) launchAtFilter() *ec2.Filter {
+func (f *InstanceListFilter) launchAtFilter() *types.Filter {
 	if f.launchAt == nil {
 		return nil
 	}
 
-	filter := &ec2.Filter{
+	filter := &types.Filter{
 		Name: aws.String(launch_time_key),
-		Values: []*string{
-			aws.String(*f.launchAt),
+		Values: []string{
+			*f.launchAt,
 		},
 	}
 	return filter

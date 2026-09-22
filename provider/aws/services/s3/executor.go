@@ -2,65 +2,65 @@ package s3
 
 import (
 	"cloudctl/executor"
-	"cloudctl/provider/aws"
+	"cloudctl/global"
 	"cloudctl/provider/aws/cli/globals"
 
 	ctltime "cloudctl/time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 const (
 	DATE_PASER = "2006-01-02 15:04:05"
 )
 
-func NewBucketListCommandExecutor(flag *globals.CLIFlag, filter *BucketListFilter) *executor.CommandExecutor {
+func NewBucketListCommandExecutor(flag global.CLIFlag, cfg aws.Config, timeout globals.RequestTimeout, filter *BucketListFilter) *executor.CommandExecutor[*bucketListOutput] {
 	tz := ctltime.GetTZ(flag.TZShortIdentifier)
 
-	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
-
-	return &executor.CommandExecutor{
+	return &executor.CommandExecutor[*bucketListOutput]{
 		Fetcher: &bucketListFetcher{
-			client: client,
-			filter: filter,
-			tz:     tz,
+			client:         s3.NewFromConfig(cfg),
+			requestTimeout: timeout,
+			filter:         filter,
+			tz:             tz,
 		},
 		Viewer: bucketListViewer,
 	}
 }
 
-func NewBucketObjectListCommandExecutor(flag *globals.CLIFlag, bucketName string, bucketPrefix *string, maxKeys int64) *executor.CommandExecutor {
-	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
-
-	return &executor.CommandExecutor{
+func NewBucketObjectListCommandExecutor(cfg aws.Config, bucketName string, bucketPrefix *string, maxKeys int32) *executor.CommandExecutor[*bucketObjectListOutput] {
+	return &executor.CommandExecutor[*bucketObjectListOutput]{
 		Fetcher: &bucketObjectsFetcher{
-			client:       client,
+			client:       s3.NewFromConfig(cfg),
 			bucketName:   bucketName,
 			objectPrefix: bucketPrefix,
 			maxKeys:      maxKeys,
-			tz:           ctltime.GetTZ(flag.TZShortIdentifier),
+			tz:           ctltime.GetTZ(""),
 		},
 		Viewer: bucketObjectsViewer,
 	}
 }
 
-func NewBucketViewCommandExecutor(flag *globals.CLIFlag, bucketName string) *executor.CommandExecutor {
-	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
+func NewBucketViewCommandExecutor(cfg aws.Config, bucketName string) *executor.CommandExecutor[*bucketDefinition] {
 
-	return &executor.CommandExecutor{
+	return &executor.CommandExecutor[*bucketDefinition]{
 		Fetcher: &bucketConfigurationFetcher{
-			client:     client,
+			client:     s3.NewFromConfig(cfg),
 			bucketName: bucketName,
 		},
 		Viewer: bucketConfigurationViewer,
 	}
 }
 
-func NewBucketObjectDownloadCommandExecutor(flag *globals.CLIFlag, bucketName, key, path string, recursive bool) *executor.CommandExecutor {
+func NewBucketObjectDownloadCommandExecutor(cfg aws.Config, bucketName, key, path string, recursive bool) *executor.CommandExecutor[*bucketOjectsDownloadSummary] {
 
-	client := aws.NewClient(flag.Profile, flag.Region, flag.Debug)
-
-	return &executor.CommandExecutor{
+	return &executor.CommandExecutor[*bucketOjectsDownloadSummary]{
 		Fetcher: &bucketObjectsDownloadFetcher{
-			client:     client,
+			client:     s3.NewFromConfig(cfg),
+			downloader: manager.NewDownloader(s3.NewFromConfig(cfg)),
 			bucketName: bucketName,
 			key:        key,
 			path:       path,

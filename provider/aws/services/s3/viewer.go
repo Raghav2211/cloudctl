@@ -1,6 +1,7 @@
 package s3
 
 import (
+	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"fmt"
 	"sort"
@@ -26,14 +27,9 @@ var (
 	}
 )
 
-func bucketListViewer(o interface{}) viewer.Viewer {
-
-	data := o.(*bucketListOutput)
-	if data.err != nil {
-		eView := viewer.ErrorViewer{}
-		eView.SetErrorMessage(data.err.Err.Error())
-		eView.SetErrorType(data.err.ErrorType)
-		return &eView
+func bucketListViewer(data *bucketListOutput, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
 	}
 
 	tViewer := viewer.NewTableViewer()
@@ -48,18 +44,12 @@ func bucketListViewer(o interface{}) viewer.Viewer {
 	return tViewer
 }
 
-func bucketObjectsViewer(o interface{}) viewer.Viewer {
-	data := o.(*bucketObjectListOutput)
+func bucketObjectsViewer(data *bucketObjectListOutput, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
+	}
 
 	compoundViewer := viewer.NewCompoundViewer()
-	if data.err != nil && (data.err.ErrorType == viewer.ERROR || data.err.ErrorType == viewer.WARN) {
-		errViewer := viewer.NewErrorViewer()
-		errViewer.SetErrorMessage(data.err.Err.Error())
-		errViewer.SetErrorType(data.err.ErrorType)
-		compoundViewer.AddViewer(errViewer)
-		return errViewer
-
-	}
 	if len(data.objects) > 0 {
 		tViewer := viewer.NewTableViewer()
 		tViewer.AddHeader(bucketObjectsTableHeader)
@@ -81,23 +71,15 @@ func bucketObjectsViewer(o interface{}) viewer.Viewer {
 		compoundViewer.AddViewer(tViewer)
 	}
 
-	if data.err != nil {
-		errViewer := viewer.NewErrorViewer()
-		errViewer.SetErrorMessage(data.err.Err.Error())
-		errViewer.SetErrorType(data.err.ErrorType)
-		compoundViewer.AddViewer(errViewer)
+	if data.notice != nil {
+		compoundViewer.AddViewer(ctlaws.ErrorView(data.notice))
 	}
 	return compoundViewer
-
 }
 
-func bucketObjectsDownloadSummaryViewer(o interface{}) viewer.Viewer {
-	data := o.(*bucketOjectsDownloadSummary)
-	if data.err != nil {
-		errViewer := viewer.NewErrorViewer()
-		errViewer.SetErrorMessage(data.err.Err.Error())
-		errViewer.SetErrorType(data.err.ErrorType)
-		return errViewer
+func bucketObjectsDownloadSummaryViewer(data *bucketOjectsDownloadSummary, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
 	}
 
 	tViewer := viewer.NewTableViewer()
@@ -127,7 +109,9 @@ func bucketObjectsDownloadSummaryViewer(o interface{}) viewer.Viewer {
 
 }
 
-func bucketConfigurationViewer(o interface{}) viewer.Viewer {
-	o.(*bucketDefinition).Pretty()
-	return nil
+func bucketConfigurationViewer(data *bucketDefinition, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
+	}
+	return viewer.FuncViewer(data.Pretty)
 }

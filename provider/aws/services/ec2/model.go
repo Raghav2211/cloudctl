@@ -7,12 +7,33 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 )
 
+type CPUUtilizationStatus string
+
 const (
-	NO_VALUE string = "-"
+	NO_VALUE     string               = "-"
+	CPU_LOW      CPUUtilizationStatus = "Low"
+	CPU_MODERATE CPUUtilizationStatus = "Moderate"
+	CPU_HIGH     CPUUtilizationStatus = "High"
 )
+
+type instanceStatisticsOutput struct {
+	instanceId *string
+
+	Average *float64
+	Maximum *float64
+	Minimum *float64
+
+	CPUStatus CPUUtilizationStatus
+
+	apiError *aws.ErrorInfo
+}
+
+type instanceStatisticsListOutput struct {
+	stats []instanceStatisticsOutput
+}
 
 type ingressRule struct {
 	portRange *string
@@ -32,6 +53,42 @@ type instanceIngressEgressRuleSummary struct {
 	ingressRules []*ingressRule
 	egressRules  []*egressRule
 	apiError     *aws.ErrorInfo
+}
+
+// sgExplanation is idea #10's output: a security group's raw rules plus a
+// Hypothesis-grade AI narration of them. aiSummary is additive, never a
+// replacement for ingressRules/egressRules — if empty, aiSummaryUnavailable
+// explains why (AI is never a hard dependency), mirroring bucketDefinition
+// in the s3 package.
+type sgExplanation struct {
+	sgId         *string
+	sgName       *string
+	description  *string
+	ingressRules []*ingressRule
+	egressRules  []*egressRule
+
+	aiSummary            string
+	aiSummaryUnavailable string
+}
+
+func newSGExplanation(sgId, sgName, description string, ingressRules []*ingressRule, egressRules []*egressRule) *sgExplanation {
+	return &sgExplanation{
+		sgId:         &sgId,
+		sgName:       &sgName,
+		description:  &description,
+		ingressRules: ingressRules,
+		egressRules:  egressRules,
+	}
+}
+
+func (e *sgExplanation) SetAISummary(summary string) *sgExplanation {
+	e.aiSummary = summary
+	return e
+}
+
+func (e *sgExplanation) SetAISummaryUnavailable(reason string) *sgExplanation {
+	e.aiSummaryUnavailable = reason
+	return e
 }
 
 type instanceDetail struct {
@@ -70,7 +127,7 @@ type instanceVolumeSummary struct {
 
 type instanceVolume struct {
 	creationTime *time.Time
-	size         *int64
+	size         *int32
 	isEncrypt    *bool
 	kmsKey       *string
 	state        *string
@@ -98,18 +155,16 @@ type instanceDefinition struct {
 	volumesSummary    *instanceVolumeSummary
 	ruleSummary       *instanceIngressEgressRuleSummary
 	networkInterfaces []*instanceNetworkinterface
-	err               error
 }
 
 type instanceListOutput struct {
 	instancesByState map[string][]*instanceSummary
-	err              *aws.ErrorInfo
 }
 
-func (summary *instanceSummary) setIAMProfileARN(profile *ec2.IamInstanceProfile) *instanceSummary {
+func (summary *instanceSummary) setIAMProfileARN(profile *types.IamInstanceProfile) *instanceSummary {
 	novalue := NO_VALUE
 	summary.iamroleArn = &novalue
-	if profile != nil {
+	if profile != nil && profile.Arn != nil {
 		summary.iamroleArn = profile.Arn
 	}
 	return summary
@@ -155,12 +210,14 @@ func (summary *instanceSummary) setPrivateAddr(privateIp, privateDnsName *string
 	return summary
 }
 
-func newInstanceSummary(instance *ec2.Instance, tz *ctltime.Timezone) *instanceSummary {
+func newInstanceSummary(instance types.Instance, tz *ctltime.Timezone) *instanceSummary {
+	state := string(instance.State.Name)
+	typee := string(instance.InstanceType)
 	instanceSummary := &instanceSummary{
 		id:         instance.InstanceId,
 		az:         instance.Placement.AvailabilityZone,
-		state:      instance.State.Name,
-		typee:      instance.InstanceType,
+		state:      &state,
+		typee:      &typee,
 		launchTime: tz.AdaptTimezone(instance.LaunchTime),
 	}
 	instanceSummary.setIAMProfileARN(instance.IamInstanceProfile)
@@ -170,15 +227,19 @@ func newInstanceSummary(instance *ec2.Instance, tz *ctltime.Timezone) *instanceS
 	return instanceSummary
 }
 
-func newInstanceDetail(instance *ec2.Instance, tz *ctltime.Timezone) *instanceDetail {
+func newInstanceDetail(instance types.Instance, tz *ctltime.Timezone) *instanceDetail {
 	platform := NO_VALUE
-	if instance.Platform != nil {
-		platform = *instance.Platform
+	if instance.Platform != "" {
+		platform = string(instance.Platform)
+	}
+	monitor := NO_VALUE
+	if instance.Monitoring != nil {
+		monitor = string(instance.Monitoring.State)
 	}
 	return &instanceDetail{
 		platform:   &platform,
 		amiId:      instance.ImageId,
-		monitor:    instance.Monitoring.State,
+		monitor:    &monitor,
 		osdetails:  instance.PlatformDetails,
 		launchTime: tz.AdaptTimezone(instance.LaunchTime),
 	}
@@ -190,7 +251,7 @@ func newInstanceVolumeSummary(volumes []*instanceVolume, apiError *aws.ErrorInfo
 	}
 }
 
-func newInstanceVolume(volume *ec2.Volume) *instanceVolume {
+func newInstanceVolume(volume types.Volume) *instanceVolume {
 	attachments := []*volumeAttachment{}
 	kmsKey := "N/A"
 	if volume.KmsKeyId != nil {
@@ -199,22 +260,23 @@ func newInstanceVolume(volume *ec2.Volume) *instanceVolume {
 	for _, attachment := range volume.Attachments {
 		attachments = append(attachments, newVolumeAttachment(attachment))
 	}
+	state := string(volume.State)
 	return &instanceVolume{
 		attachments:  attachments,
 		creationTime: volume.CreateTime,
 		size:         volume.Size,
 		isEncrypt:    volume.Encrypted,
 		kmsKey:       &kmsKey,
-		state:        volume.State,
+		state:        &state,
 	}
 }
-func newSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDescription string, ingressPermissions []*ec2.IpPermission) (ingressRules []*ingressRule) {
+func newSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDescription string, ingressPermissions []types.IpPermission) (ingressRules []*ingressRule) {
 	ingressRules = []*ingressRule{}
 	sgIdWithName := fmt.Sprintf("%s(%s)", securityGroupId, securityGroupName)
 	portRange := "ALL" //  if IpProtocol is -1
 	protocol := "ALL"  //  if IpProtocol is -1
 	for _, permission := range ingressPermissions {
-		if *permission.IpProtocol != "-1" {
+		if permission.IpProtocol != nil && *permission.IpProtocol != "-1" {
 			portRange = fmt.Sprintf("%d", *permission.ToPort)
 			if *permission.FromPort != *permission.ToPort {
 				portRange = fmt.Sprintf("%d-%d", *permission.FromPort, *permission.ToPort)
@@ -266,13 +328,13 @@ func newSecurityIngressRules(securityGroupId, securityGroupName, securityGroupDe
 	return
 }
 
-func newSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDescription string, egressPermissions []*ec2.IpPermission) (egressRules []*egressRule) {
+func newSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDescription string, egressPermissions []types.IpPermission) (egressRules []*egressRule) {
 	egressRules = []*egressRule{}
 	sgIdWithName := fmt.Sprintf("%s(%s)", securityGroupId, securityGroupName)
 	for _, rule := range egressPermissions {
 		portRange := "ALL" // handle if IpProtocol is -1
 		protocol := "ALL"  // handle if IpProtocol is -1
-		if *rule.IpProtocol != "-1" {
+		if rule.IpProtocol != nil && *rule.IpProtocol != "-1" {
 			portRange = fmt.Sprintf("%d", *rule.FromPort)
 			if (rule.FromPort != nil || rule.ToPort != nil) && (*rule.FromPort != *rule.ToPort) {
 				portRange = fmt.Sprintf("%d-%d", *rule.FromPort, *rule.ToPort)
@@ -310,24 +372,29 @@ func newSecurityEgressRules(securityGroupId, securityGroupName, securityGroupDes
 	}
 	return
 }
-func newVolumeAttachment(attachment *ec2.VolumeAttachment) *volumeAttachment {
+func newVolumeAttachment(attachment types.VolumeAttachment) *volumeAttachment {
+	state := string(attachment.State)
 	return &volumeAttachment{
 		id:                  attachment.VolumeId,
 		time:                attachment.AttachTime,
 		deleteOnTermination: attachment.DeleteOnTermination,
 		device:              attachment.Device,
-		state:               attachment.State,
+		state:               &state,
 	}
 }
 
-func newInstanceNetworkSummary(eni *ec2.InstanceNetworkInterface) *instanceNetworkinterface {
+func newInstanceNetworkSummary(eni types.InstanceNetworkInterface) *instanceNetworkinterface {
 	publicIpV4Address := NO_VALUE
 	publicIpV4DNS := NO_VALUE
 	privateIpV4Address := NO_VALUE
 	privateIpV4DNS := NO_VALUE
 	if eni.Association != nil {
-		publicIpV4Address = *eni.Association.PublicIp
-		publicIpV4DNS = *eni.Association.PublicDnsName
+		if eni.Association.PublicIp != nil {
+			publicIpV4Address = *eni.Association.PublicIp
+		}
+		if eni.Association.PublicDnsName != nil {
+			publicIpV4DNS = *eni.Association.PublicDnsName
+		}
 	}
 	if eni.PrivateDnsName != nil {
 		privateIpV4DNS = *eni.PrivateDnsName
@@ -340,6 +407,13 @@ func newInstanceNetworkSummary(eni *ec2.InstanceNetworkInterface) *instanceNetwo
 		o := fmt.Sprintf("%s(%s)", *sg.GroupId, *sg.GroupName)
 		sgIdWithNames = append(sgIdWithNames, &o)
 	}
+	var attachTime *time.Time
+	var deleteOnTermination *bool
+	if eni.Attachment != nil {
+		attachTime = eni.Attachment.AttachTime
+		deleteOnTermination = eni.Attachment.DeleteOnTermination
+	}
+	attachStatus := string(eni.Status)
 	return &instanceNetworkinterface{
 		id:                  eni.NetworkInterfaceId,
 		description:         eni.Description,
@@ -347,11 +421,11 @@ func newInstanceNetworkSummary(eni *ec2.InstanceNetworkInterface) *instanceNetwo
 		privateIpv4DNS:      &privateIpV4DNS,
 		publicIpv4Add:       &publicIpV4Address,
 		publicIpv4DNS:       &publicIpV4DNS,
-		attachTime:          eni.Attachment.AttachTime,
-		attachStatus:        eni.Status,
+		attachTime:          attachTime,
+		attachStatus:        &attachStatus,
 		vpcId:               eni.VpcId,
 		subnetId:            eni.SubnetId,
-		deleteOnTermination: eni.Attachment.DeleteOnTermination,
+		deleteOnTermination: deleteOnTermination,
 		securityGroups:      &sgIdWithNames,
 	}
 

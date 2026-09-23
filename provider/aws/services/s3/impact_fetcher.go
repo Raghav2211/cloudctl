@@ -182,7 +182,9 @@ func (impact *bucketImpact) applyAISummary(ctx context.Context, client *ai.Clien
 		impact.SetAISummaryUnavailable("no customer-managed IAM policies reference this bucket")
 		return
 	}
-	summary, err := client.Summarize(ctx, facts)
+	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
+		return client.Summarize(ctx, facts)
+	})
 	if err != nil {
 		impact.SetAISummaryUnavailable(err.Error())
 		return

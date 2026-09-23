@@ -1,17 +1,35 @@
 package viewer
 
 import (
-	"github.com/fatih/color"
+	"fmt"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
-type ErrorType color.Attribute
+type ErrorType int
 
 const (
-	DEBUG ErrorType = ErrorType(color.FgBlue)
-	WARN  ErrorType = ErrorType(color.FgYellow)
-	INFO  ErrorType = ErrorType(color.FgBlue)
-	ERROR ErrorType = ErrorType(color.FgRed)
+	DEBUG ErrorType = iota
+	WARN
+	INFO
+	ERROR
 )
+
+// errorTypeColors maps each severity to its adaptive color and banner text,
+// part of cloudctl's design system (ADR-0019).
+var errorTypeColors = map[ErrorType]lipgloss.AdaptiveColor{
+	DEBUG: {Light: "#6E7781", Dark: "#8B949E"}, // muted gray
+	WARN:  {Light: "#9A6700", Dark: "#D29922"}, // amber
+	INFO:  {Light: "#5A56E0", Dark: "#8B87F7"}, // accent (same as headers — informational, not alarming)
+	ERROR: {Light: "#CF222E", Dark: "#F85149"}, // red
+}
+
+var errorTypeBanner = map[ErrorType]string{
+	DEBUG: "DEBUG!",
+	WARN:  "WARNING!",
+	INFO:  "INFO!",
+	ERROR: "ERROR!",
+}
 
 type ErrorViewer struct {
 	message   string
@@ -38,17 +56,10 @@ func (t *ErrorViewer) IsErrorView() bool {
 func (t *ErrorViewer) IsFailure() bool {
 	return t.errorType == ERROR
 }
+
 func (e *ErrorViewer) View() {
-	black := color.New(color.Attribute(e.errorType))
-	boldColor := black.Add(color.Bold)
-	if e.errorType == WARN {
-		boldColor.Println("WARNING!")
-	} else if e.errorType == ERROR {
-		boldColor.Println("ERROR!")
-	} else if e.errorType == DEBUG {
-		boldColor.Println("DEBUG!")
-	} else {
-		boldColor.Println("INFO!")
-	}
-	boldColor.Println(e.message)
+	style := lipgloss.NewStyle().Bold(true).Foreground(errorTypeColors[e.errorType])
+	fmt.Println()
+	fmt.Println(style.Render(errorTypeBanner[e.errorType]))
+	fmt.Println(style.Render(e.message))
 }

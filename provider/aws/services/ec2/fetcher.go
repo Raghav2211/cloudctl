@@ -198,7 +198,9 @@ func (def *instanceDefinition) applyAISummary(ctx context.Context, client *ai.Cl
 		def.SetAISummaryUnavailable("no evidence could be gathered")
 		return
 	}
-	summary, err := client.Summarize(ctx, facts)
+	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
+		return client.Summarize(ctx, facts)
+	})
 	if err != nil {
 		def.SetAISummaryUnavailable(err.Error())
 		return
@@ -344,7 +346,9 @@ func (e *sgExplanation) applyAISummary(ctx context.Context, client *ai.Client, f
 		e.SetAISummaryUnavailable("no evidence could be gathered")
 		return
 	}
-	summary, err := client.Summarize(ctx, facts)
+	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
+		return client.Summarize(ctx, facts)
+	})
 	if err != nil {
 		e.SetAISummaryUnavailable(err.Error())
 		return

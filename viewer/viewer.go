@@ -26,7 +26,7 @@ func (f FuncViewer) IsFailure() bool   { return false }
 func (f FuncViewer) View()             { f() }
 
 func NewTableViewer() *TableViewer {
-	return &TableViewer{}
+	return &TableViewer{style: DefaultTableStyle()}
 }
 
 func NewErrorViewer() *ErrorViewer {

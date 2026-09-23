@@ -179,8 +179,14 @@ func bucketImpactViewer(data *bucketImpact, err error) viewer.Viewer {
 		return compound
 	}
 
+	// Actions/Principals can legitimately be long (a broad admin policy's
+	// action list, a policy attached to several principals) — unlike most
+	// tables in this codebase, this one has a genuinely dominant wide
+	// column, so an explicit MaxWidth is worth setting here (ADR-0019).
+	style := viewer.DefaultTableStyle()
+	style.MaxWidth = 160
 	tViewer := viewer.NewTableViewer()
-	tViewer.SetStyle(viewer.DefaultTableStyle())
+	tViewer.SetStyle(style)
 	tViewer.SetTitle("IAM Cross-Reference (Inference — deterministic ARN match)")
 	tViewer.AddHeader(bucketImpactTableHeader)
 	for _, m := range data.matches {

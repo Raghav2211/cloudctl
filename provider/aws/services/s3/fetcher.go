@@ -207,7 +207,9 @@ func (definition *bucketDefinition) applyAISummary(ctx context.Context, client *
 		definition.SetAISummaryUnavailable("no evidence could be gathered (all fetches failed)")
 		return
 	}
-	summary, err := client.Summarize(ctx, facts)
+	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
+		return client.Summarize(ctx, facts)
+	})
 	if err != nil {
 		definition.SetAISummaryUnavailable(err.Error())
 		return

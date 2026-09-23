@@ -23,6 +23,9 @@ type bucketImpact struct {
 	aiSummary            string
 	aiSummaryUnavailable string
 
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
+
 	relationshipsSaved int
 	relationshipsError string
 }
@@ -38,5 +41,15 @@ func (impact *bucketImpact) SetAISummary(summary string) *bucketImpact {
 
 func (impact *bucketImpact) SetAISummaryUnavailable(reason string) *bucketImpact {
 	impact.aiSummaryUnavailable = reason
+	return impact
+}
+
+func (impact *bucketImpact) SetAIRecommendations(recommendations string) *bucketImpact {
+	impact.aiRecommendations = recommendations
+	return impact
+}
+
+func (impact *bucketImpact) SetAIRecommendationsUnavailable(reason string) *bucketImpact {
+	impact.aiRecommendationsUnavailable = reason
 	return impact
 }

@@ -50,6 +50,11 @@ type CredentialConfig struct {
 }
 
 func NewCredentialConfig(cf globals.AWSCLIFlag, debug bool) CredentialConfig {
+	// Fills in --region/--profile from the last-used session when left
+	// unset, and remembers whatever ends up in effect for next time — a
+	// user shouldn't have to repeat these on every command in one terminal
+	// session. Explicit flags always win and become the new saved default.
+	cf.ResolveSessionDefaults()
 	return CredentialConfig{cf.Profile, cf.Region, Credential{cf.AccessKey, cf.SecretKey, cf.SessionToken}, cf.UseEnv, debug}
 }
 

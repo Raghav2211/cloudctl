@@ -37,6 +37,9 @@ type dbDefinition struct {
 
 	aiSummary            string
 	aiSummaryUnavailable string
+
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
 }
 
 func newDBSummaryFromInstance(inst types.DBInstance) *dbSummary {
@@ -90,5 +93,15 @@ func (def *dbDefinition) SetAISummary(summary string) *dbDefinition {
 
 func (def *dbDefinition) SetAISummaryUnavailable(reason string) *dbDefinition {
 	def.aiSummaryUnavailable = reason
+	return def
+}
+
+func (def *dbDefinition) SetAIRecommendations(recommendations string) *dbDefinition {
+	def.aiRecommendations = recommendations
+	return def
+}
+
+func (def *dbDefinition) SetAIRecommendationsUnavailable(reason string) *dbDefinition {
+	def.aiRecommendationsUnavailable = reason
 	return def
 }

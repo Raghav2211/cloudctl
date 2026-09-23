@@ -6,6 +6,7 @@ import (
 	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"context"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
@@ -63,6 +64,7 @@ func (f tableListFetcher) Fetch(ctx context.Context) (*tableListOutput, error) {
 // the definition rather than failing the whole command (ADR-010's
 // AI-narration-is-additive discipline extended to these sub-fetches too).
 func (f tableDefinitionFetcher) Fetch(ctx context.Context) (*tableDefinition, error) {
+	viewer.SetProgress(ctx, "Fetching table "+f.tableName+"...")
 	descOut, err := f.client.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: &f.tableName})
 	if err != nil {
 		return nil, ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -73,12 +75,14 @@ func (f tableDefinitionFetcher) Fetch(ctx context.Context) (*tableDefinition, er
 
 	def := newTableDefinition(*descOut.Table)
 
+	viewer.SetProgress(ctx, "Fetching point-in-time recovery status...")
 	if backupsOut, err := f.client.DescribeContinuousBackups(ctx, &dynamodb.DescribeContinuousBackupsInput{TableName: &f.tableName}); err != nil {
 		def.SetPITRAPIError(ctlaws.AWSError(err))
 	} else if backupsOut.ContinuousBackupsDescription != nil && backupsOut.ContinuousBackupsDescription.PointInTimeRecoveryDescription != nil {
 		def.SetPITR(string(backupsOut.ContinuousBackupsDescription.PointInTimeRecoveryDescription.PointInTimeRecoveryStatus))
 	}
 
+	viewer.SetProgress(ctx, "Fetching time-to-live configuration...")
 	if ttlOut, err := f.client.DescribeTimeToLive(ctx, &dynamodb.DescribeTimeToLiveInput{TableName: &f.tableName}); err != nil {
 		def.SetTTLAPIError(ctlaws.AWSError(err))
 	} else if ttlOut.TimeToLiveDescription != nil {
@@ -86,25 +90,61 @@ func (f tableDefinitionFetcher) Fetch(ctx context.Context) (*tableDefinition, er
 	}
 
 	facts := tableDefinitionEvidence(def)
-	def.applyAISummary(ctx, ai.NewClientFromEnv(), facts)
+	def.applyAINarration(ctx, ai.NewClientFromEnv(), facts)
 
 	return def, nil
 }
 
-// applyAISummary sets aiSummary or aiSummaryUnavailable from the given
-// evidence, never returning an error (ADR-010). Mirrors every other
-// applyAISummary in this codebase (s3, ec2).
-func (def *tableDefinition) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
+// applyAINarration sets the AI summary and recommendations (or their
+// ...Unavailable fallbacks) from the given evidence, never returning an
+// error (ADR-010). Summarize and Recommend run concurrently under a single
+// spinner rather than back-to-back — each is a full local-LLM call, and
+// serializing them would double an already-slow wait for no benefit.
+// Mirrors every other applyAINarration in this codebase (s3, ec2, eks, vpc,
+// rds).
+func (def *tableDefinition) applyAINarration(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
 	if len(facts) == 0 {
 		def.SetAISummaryUnavailable("no evidence could be gathered")
+		def.SetAIRecommendationsUnavailable("no evidence could be gathered")
 		return
 	}
-	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
-		return client.Summarize(ctx, facts)
+
+	type narration struct {
+		summary, summaryErr             string
+		recommendations, recommendedErr string
+	}
+	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+		var n narration
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if summary, err := client.Summarize(ctx, facts); err != nil {
+				n.summaryErr = err.Error()
+			} else {
+				n.summary = summary
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if recommendations, err := client.Recommend(ctx, facts); err != nil {
+				n.recommendedErr = err.Error()
+			} else {
+				n.recommendations = recommendations
+			}
+		}()
+		wg.Wait()
+		return n, nil
 	})
-	if err != nil {
-		def.SetAISummaryUnavailable(err.Error())
-		return
+
+	if result.summaryErr != "" {
+		def.SetAISummaryUnavailable(result.summaryErr)
+	} else {
+		def.SetAISummary(result.summary)
 	}
-	def.SetAISummary(summary)
+	if result.recommendedErr != "" {
+		def.SetAIRecommendationsUnavailable(result.recommendedErr)
+	} else {
+		def.SetAIRecommendations(result.recommendations)
+	}
 }

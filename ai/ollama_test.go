@@ -97,6 +97,85 @@ func TestSummarize_EmptyResponse(t *testing.T) {
 	}
 }
 
+func TestRecommend_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/generate" {
+			t.Errorf("expected request to /api/generate, got %s", r.URL.Path)
+		}
+		var req generateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if !strings.Contains(req.Prompt, "SSE-KMS") {
+			t.Errorf("expected prompt to include evidence values, got: %s", req.Prompt)
+		}
+		if req.Stream {
+			t.Error("expected non-streaming request")
+		}
+		json.NewEncoder(w).Encode(generateResponse{Response: "  Enable versioning to protect against accidental deletion.  "})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "test-model")
+	got, err := client.Recommend(context.Background(), testFacts())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "Enable versioning to protect against accidental deletion." {
+		t.Errorf("expected trimmed response, got %q", got)
+	}
+}
+
+func TestRecommend_NoEvidence(t *testing.T) {
+	client := NewClient("http://unused.invalid", "test-model")
+	if _, err := client.Recommend(context.Background(), nil); err == nil {
+		t.Fatal("expected an error when no evidence is provided, got nil")
+	}
+}
+
+func TestRecommend_ServerUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	unreachableURL := srv.URL
+	srv.Close() // closed before use: nothing is listening on this address anymore
+
+	client := NewClient(unreachableURL, "test-model")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if _, err := client.Recommend(ctx, testFacts()); err == nil {
+		t.Fatal("expected an error when the Ollama server is unreachable, got nil")
+	}
+}
+
+func TestRecommend_ServerError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(generateResponse{Error: "model not found"})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "test-model")
+	_, err := client.Recommend(context.Background(), testFacts())
+	if err == nil {
+		t.Fatal("expected an error on a non-200 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "model not found") {
+		t.Errorf("expected error to surface the ollama error message, got: %v", err)
+	}
+}
+
+func TestRecommend_EmptyResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(generateResponse{Response: "   "})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "test-model")
+	if _, err := client.Recommend(context.Background(), testFacts()); err == nil {
+		t.Fatal("expected an error on an empty/whitespace-only response, got nil")
+	}
+}
+
 func TestSummarize_RespectsContextCancellation(t *testing.T) {
 	blocked := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

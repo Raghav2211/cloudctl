@@ -45,6 +45,18 @@ func clusterDefinitionViewer(data *clusterDefinition, err error) viewer.Viewer {
 	}
 	compound.AddViewer(summaryPanel)
 
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", derefStr(data.name)))
+	if data.aiRecommendations != "" {
+		recommendationsPanel.SetBody(data.aiRecommendations)
+	} else {
+		reason := data.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	compound.AddViewer(recommendationsPanel)
+
 	dataPanel := viewer.NewPanel().SetTitle("Cluster Configuration")
 	dataPanel.AddEntry("Version", derefStr(data.version))
 	dataPanel.AddEntry("Status", derefStr(data.status))

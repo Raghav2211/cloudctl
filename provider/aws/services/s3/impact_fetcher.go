@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/iam/types"
@@ -96,7 +97,7 @@ func (f bucketImpactFetcher) Fetch(ctx context.Context) (*bucketImpact, error) {
 	}
 
 	facts := bucketImpactEvidence(impact)
-	impact.applyAISummary(ctx, ai.NewClientFromEnv(), facts)
+	impact.applyAINarration(ctx, ai.NewClientFromEnv(), facts)
 	impact.saveRelationships(ctx, targetARN)
 
 	return impact, nil
@@ -174,22 +175,56 @@ func (f bucketImpactFetcher) matchPolicy(ctx context.Context, policy types.Polic
 	}, true
 }
 
-// applyAISummary sets aiSummary or aiSummaryUnavailable, never returning an
-// error (ADR-010). Mirrors sgExplanation/instanceDefinition/bucketDefinition
-// in this and the ec2 package.
-func (impact *bucketImpact) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
+// applyAINarration sets the AI summary and recommendations (or their
+// ...Unavailable fallbacks), never returning an error (ADR-010). Summarize
+// and Recommend run concurrently under a single spinner rather than
+// back-to-back. Mirrors sgExplanation/instanceDefinition/bucketDefinition's
+// applyAINarration in this and the ec2 package.
+func (impact *bucketImpact) applyAINarration(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
 	if len(facts) == 0 {
 		impact.SetAISummaryUnavailable("no customer-managed IAM policies reference this bucket")
+		impact.SetAIRecommendationsUnavailable("no customer-managed IAM policies reference this bucket")
 		return
 	}
-	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
-		return client.Summarize(ctx, facts)
+
+	type narration struct {
+		summary, summaryErr             string
+		recommendations, recommendedErr string
+	}
+	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+		var n narration
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if summary, err := client.Summarize(ctx, facts); err != nil {
+				n.summaryErr = err.Error()
+			} else {
+				n.summary = summary
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if recommendations, err := client.Recommend(ctx, facts); err != nil {
+				n.recommendedErr = err.Error()
+			} else {
+				n.recommendations = recommendations
+			}
+		}()
+		wg.Wait()
+		return n, nil
 	})
-	if err != nil {
-		impact.SetAISummaryUnavailable(err.Error())
-		return
+
+	if result.summaryErr != "" {
+		impact.SetAISummaryUnavailable(result.summaryErr)
+	} else {
+		impact.SetAISummary(result.summary)
 	}
-	impact.SetAISummary(summary)
+	if result.recommendedErr != "" {
+		impact.SetAIRecommendationsUnavailable(result.recommendedErr)
+	} else {
+		impact.SetAIRecommendations(result.recommendations)
+	}
 }
 
 // saveRelationships is the relationships table's first real write path

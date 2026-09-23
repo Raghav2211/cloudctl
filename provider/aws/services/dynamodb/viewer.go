@@ -44,6 +44,18 @@ func tableDefinitionViewer(data *tableDefinition, err error) viewer.Viewer {
 	}
 	compound.AddViewer(summaryPanel)
 
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", derefStr(data.name)))
+	if data.aiRecommendations != "" {
+		recommendationsPanel.SetBody(data.aiRecommendations)
+	} else {
+		reason := data.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	compound.AddViewer(recommendationsPanel)
+
 	dataPanel := viewer.NewPanel().SetTitle("Table Configuration")
 	dataPanel.AddEntry("Status", derefStr(data.status))
 	dataPanel.AddEntry("Billing Mode", derefStr(data.billingMode))

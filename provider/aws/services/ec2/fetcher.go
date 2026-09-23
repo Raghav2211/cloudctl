@@ -184,28 +184,61 @@ func fetchInstanceDefinition(ctx context.Context, instanceId *string, tz *ctltim
 	wg.Wait()
 
 	facts := instanceDefinitionEvidence(definition)
-	definition.applyAISummary(ctx, ai.NewClientFromEnv(), facts)
+	definition.applyAINarration(ctx, ai.NewClientFromEnv(), facts)
 
 	return definition, nil
 }
 
-// applyAISummary sets aiSummary or aiSummaryUnavailable from the given
-// evidence, never returning an error (ADR-010). Mirrors
-// sgExplanation.applyAISummary and bucketDefinition.applyAISummary in the s3
-// package.
-func (def *instanceDefinition) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
+// applyAINarration sets the AI summary and recommendations (or their
+// ...Unavailable fallbacks) from the given evidence, never returning an
+// error (ADR-010). Summarize and Recommend run concurrently under a single
+// spinner rather than back-to-back. Mirrors sgExplanation.applyAINarration
+// and dynamodb's applyAINarration.
+func (def *instanceDefinition) applyAINarration(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
 	if len(facts) == 0 {
 		def.SetAISummaryUnavailable("no evidence could be gathered")
+		def.SetAIRecommendationsUnavailable("no evidence could be gathered")
 		return
 	}
-	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
-		return client.Summarize(ctx, facts)
+
+	type narration struct {
+		summary, summaryErr             string
+		recommendations, recommendedErr string
+	}
+	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+		var n narration
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if summary, err := client.Summarize(ctx, facts); err != nil {
+				n.summaryErr = err.Error()
+			} else {
+				n.summary = summary
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if recommendations, err := client.Recommend(ctx, facts); err != nil {
+				n.recommendedErr = err.Error()
+			} else {
+				n.recommendations = recommendations
+			}
+		}()
+		wg.Wait()
+		return n, nil
 	})
-	if err != nil {
-		def.SetAISummaryUnavailable(err.Error())
-		return
+
+	if result.summaryErr != "" {
+		def.SetAISummaryUnavailable(result.summaryErr)
+	} else {
+		def.SetAISummary(result.summary)
 	}
-	def.SetAISummary(summary)
+	if result.recommendedErr != "" {
+		def.SetAIRecommendationsUnavailable(result.recommendedErr)
+	} else {
+		def.SetAIRecommendations(result.recommendations)
+	}
 }
 
 func fetchInstanceVolumeSummary(ctx context.Context, volumemappings []types.InstanceBlockDeviceMapping, client *ec2.Client) *instanceVolumeSummary {
@@ -333,25 +366,59 @@ func (f sgExplainFetcher) Fetch(ctx context.Context) (*sgExplanation, error) {
 	explanation := newSGExplanation(sgId, sgName, description, ingress, egress)
 
 	facts := securityGroupEvidence(sgId, sgName, description, ingress, egress)
-	explanation.applyAISummary(ctx, ai.NewClientFromEnv(), facts)
+	explanation.applyAINarration(ctx, ai.NewClientFromEnv(), facts)
 
 	return explanation, nil
 }
 
-// applyAISummary sets aiSummary or aiSummaryUnavailable from the given
-// evidence, never returning an error (ADR-010). Mirrors
-// bucketDefinition.applyAISummary in the s3 package.
-func (e *sgExplanation) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
+// applyAINarration sets the AI summary and recommendations (or their
+// ...Unavailable fallbacks) from the given evidence, never returning an
+// error (ADR-010). Summarize and Recommend run concurrently under a single
+// spinner rather than back-to-back. Mirrors
+// instanceDefinition.applyAINarration in this same package.
+func (e *sgExplanation) applyAINarration(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
 	if len(facts) == 0 {
 		e.SetAISummaryUnavailable("no evidence could be gathered")
+		e.SetAIRecommendationsUnavailable("no evidence could be gathered")
 		return
 	}
-	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
-		return client.Summarize(ctx, facts)
+
+	type narration struct {
+		summary, summaryErr             string
+		recommendations, recommendedErr string
+	}
+	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+		var n narration
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if summary, err := client.Summarize(ctx, facts); err != nil {
+				n.summaryErr = err.Error()
+			} else {
+				n.summary = summary
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if recommendations, err := client.Recommend(ctx, facts); err != nil {
+				n.recommendedErr = err.Error()
+			} else {
+				n.recommendations = recommendations
+			}
+		}()
+		wg.Wait()
+		return n, nil
 	})
-	if err != nil {
-		e.SetAISummaryUnavailable(err.Error())
-		return
+
+	if result.summaryErr != "" {
+		e.SetAISummaryUnavailable(result.summaryErr)
+	} else {
+		e.SetAISummary(result.summary)
 	}
-	e.SetAISummary(summary)
+	if result.recommendedErr != "" {
+		e.SetAIRecommendationsUnavailable(result.recommendedErr)
+	} else {
+		e.SetAIRecommendations(result.recommendations)
+	}
 }

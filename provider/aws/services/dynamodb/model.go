@@ -42,6 +42,9 @@ type tableDefinition struct {
 
 	aiSummary            string
 	aiSummaryUnavailable string
+
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
 }
 
 func newTableSummary(name string) *tableSummary {
@@ -111,5 +114,15 @@ func (def *tableDefinition) SetAISummary(summary string) *tableDefinition {
 
 func (def *tableDefinition) SetAISummaryUnavailable(reason string) *tableDefinition {
 	def.aiSummaryUnavailable = reason
+	return def
+}
+
+func (def *tableDefinition) SetAIRecommendations(recommendations string) *tableDefinition {
+	def.aiRecommendations = recommendations
+	return def
+}
+
+func (def *tableDefinition) SetAIRecommendationsUnavailable(reason string) *tableDefinition {
+	def.aiRecommendationsUnavailable = reason
 	return def
 }

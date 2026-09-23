@@ -47,6 +47,18 @@ func vpcDefinitionViewer(data *vpcDefinition, err error) viewer.Viewer {
 	}
 	compound.AddViewer(summaryPanel)
 
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", derefStr(data.id)))
+	if data.aiRecommendations != "" {
+		recommendationsPanel.SetBody(data.aiRecommendations)
+	} else {
+		reason := data.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	compound.AddViewer(recommendationsPanel)
+
 	// This is genuinely hierarchical data (VPC -> subnets, gateways), so it
 	// renders as a real tree (Track H's viewer.Tree) instead of a flat table
 	// with a repeated parent-ID column.

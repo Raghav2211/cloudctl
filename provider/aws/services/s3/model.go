@@ -63,6 +63,9 @@ type bucketDefinition struct {
 	// aiSummaryUnavailable explains why (AI is never a hard dependency).
 	aiSummary            string
 	aiSummaryUnavailable string
+
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
 }
 
 func newBucketOutput(bucket types.Bucket, tz *ctltime.Timezone) *bucketOutput {
@@ -151,5 +154,15 @@ func (o *bucketDefinition) SetAISummary(summary string) *bucketDefinition {
 
 func (o *bucketDefinition) SetAISummaryUnavailable(reason string) *bucketDefinition {
 	o.aiSummaryUnavailable = reason
+	return o
+}
+
+func (o *bucketDefinition) SetAIRecommendations(recommendations string) *bucketDefinition {
+	o.aiRecommendations = recommendations
+	return o
+}
+
+func (o *bucketDefinition) SetAIRecommendationsUnavailable(reason string) *bucketDefinition {
+	o.aiRecommendationsUnavailable = reason
 	return o
 }

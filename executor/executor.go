@@ -31,7 +31,9 @@ type CommandExecutor[T any] struct {
 
 func (exe *CommandExecutor[T]) Execute(ctx context.Context) error {
 	start := time.Now()
-	data, fetchErr := exe.Fetcher.Fetch(ctx)
+	data, fetchErr := viewer.WithProgressSpinner(ctx, "Fetching...", func(ctx context.Context) (T, error) {
+		return exe.Fetcher.Fetch(ctx)
+	})
 	view := exe.Viewer(data, fetchErr)
 	view.View()
 

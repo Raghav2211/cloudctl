@@ -69,6 +69,9 @@ type sgExplanation struct {
 
 	aiSummary            string
 	aiSummaryUnavailable string
+
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
 }
 
 func newSGExplanation(sgId, sgName, description string, ingressRules []*ingressRule, egressRules []*egressRule) *sgExplanation {
@@ -88,6 +91,16 @@ func (e *sgExplanation) SetAISummary(summary string) *sgExplanation {
 
 func (e *sgExplanation) SetAISummaryUnavailable(reason string) *sgExplanation {
 	e.aiSummaryUnavailable = reason
+	return e
+}
+
+func (e *sgExplanation) SetAIRecommendations(recommendations string) *sgExplanation {
+	e.aiRecommendations = recommendations
+	return e
+}
+
+func (e *sgExplanation) SetAIRecommendationsUnavailable(reason string) *sgExplanation {
+	e.aiRecommendationsUnavailable = reason
 	return e
 }
 
@@ -158,6 +171,9 @@ type instanceDefinition struct {
 
 	aiSummary            string
 	aiSummaryUnavailable string
+
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
 }
 
 type instanceListOutput struct {
@@ -468,5 +484,15 @@ func (def *instanceDefinition) SetAISummary(summary string) *instanceDefinition 
 
 func (def *instanceDefinition) SetAISummaryUnavailable(reason string) *instanceDefinition {
 	def.aiSummaryUnavailable = reason
+	return def
+}
+
+func (def *instanceDefinition) SetAIRecommendations(recommendations string) *instanceDefinition {
+	def.aiRecommendations = recommendations
+	return def
+}
+
+func (def *instanceDefinition) SetAIRecommendationsUnavailable(reason string) *instanceDefinition {
+	def.aiRecommendationsUnavailable = reason
 	return def
 }

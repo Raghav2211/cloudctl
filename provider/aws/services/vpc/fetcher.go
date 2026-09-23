@@ -6,6 +6,7 @@ import (
 	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"context"
+	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
@@ -103,24 +104,58 @@ func (f vpcDefinitionFetcher) Fetch(ctx context.Context) (*vpcDefinition, error)
 	}
 	def.SetInternetGateways(igws)
 
-	def.applyAISummary(ctx, ai.NewClientFromEnv(), vpcDefinitionEvidence(def))
+	def.applyAINarration(ctx, ai.NewClientFromEnv(), vpcDefinitionEvidence(def))
 
 	return def, nil
 }
 
-// applyAISummary sets aiSummary or aiSummaryUnavailable from the given
-// evidence, never returning an error (ADR-010).
-func (def *vpcDefinition) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
+// applyAINarration sets the AI summary and recommendations (or their
+// ...Unavailable fallbacks) from the given evidence, never returning an
+// error (ADR-010). Summarize and Recommend run concurrently under a single
+// spinner rather than back-to-back, mirroring dynamodb's applyAINarration.
+func (def *vpcDefinition) applyAINarration(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
 	if len(facts) == 0 {
 		def.SetAISummaryUnavailable("no evidence could be gathered")
+		def.SetAIRecommendationsUnavailable("no evidence could be gathered")
 		return
 	}
-	summary, err := viewer.WithSpinner("Generating AI summary...", func() (string, error) {
-		return client.Summarize(ctx, facts)
+
+	type narration struct {
+		summary, summaryErr             string
+		recommendations, recommendedErr string
+	}
+	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+		var n narration
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			if summary, err := client.Summarize(ctx, facts); err != nil {
+				n.summaryErr = err.Error()
+			} else {
+				n.summary = summary
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			if recommendations, err := client.Recommend(ctx, facts); err != nil {
+				n.recommendedErr = err.Error()
+			} else {
+				n.recommendations = recommendations
+			}
+		}()
+		wg.Wait()
+		return n, nil
 	})
-	if err != nil {
-		def.SetAISummaryUnavailable(err.Error())
-		return
+
+	if result.summaryErr != "" {
+		def.SetAISummaryUnavailable(result.summaryErr)
+	} else {
+		def.SetAISummary(result.summary)
 	}
-	def.SetAISummary(summary)
+	if result.recommendedErr != "" {
+		def.SetAIRecommendationsUnavailable(result.recommendedErr)
+	} else {
+		def.SetAIRecommendations(result.recommendations)
+	}
 }

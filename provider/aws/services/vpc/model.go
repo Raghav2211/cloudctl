@@ -52,6 +52,9 @@ type vpcDefinition struct {
 
 	aiSummary            string
 	aiSummaryUnavailable string
+
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
 }
 
 func newVPCSummary(v types.Vpc) *vpcSummary {
@@ -96,5 +99,15 @@ func (def *vpcDefinition) SetAISummary(summary string) *vpcDefinition {
 
 func (def *vpcDefinition) SetAISummaryUnavailable(reason string) *vpcDefinition {
 	def.aiSummaryUnavailable = reason
+	return def
+}
+
+func (def *vpcDefinition) SetAIRecommendations(recommendations string) *vpcDefinition {
+	def.aiRecommendations = recommendations
+	return def
+}
+
+func (def *vpcDefinition) SetAIRecommendationsUnavailable(reason string) *vpcDefinition {
+	def.aiRecommendationsUnavailable = reason
 	return def
 }

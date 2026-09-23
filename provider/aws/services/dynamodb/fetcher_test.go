@@ -183,6 +183,12 @@ func TestTableDefinitionFetcher_Fetch_EndToEnd(t *testing.T) {
 	if def.aiSummaryUnavailable == "" {
 		t.Error("expected aiSummaryUnavailable to explain why the summary is missing")
 	}
+	if def.aiRecommendations != "" {
+		t.Errorf("expected no AI recommendations with Ollama unreachable, got %q", def.aiRecommendations)
+	}
+	if def.aiRecommendationsUnavailable == "" {
+		t.Error("expected aiRecommendationsUnavailable to explain why recommendations are missing")
+	}
 
 	// Must render without panicking regardless of AI availability.
 	tableDefinitionViewer(def, nil).View()

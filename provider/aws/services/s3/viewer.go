@@ -132,6 +132,18 @@ func bucketConfigurationViewer(data *bucketDefinition, err error) viewer.Viewer 
 	}
 	compound.AddViewer(summaryPanel)
 
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", *data.bucketName))
+	if data.aiRecommendations != "" {
+		recommendationsPanel.SetBody(data.aiRecommendations)
+	} else {
+		reason := data.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	compound.AddViewer(recommendationsPanel)
+
 	dataPanel := viewer.NewPanel().SetTitle("Bucket Configuration")
 	policyValue, policyOK := formatPolicy(data.policy)
 	addBucketField(dataPanel, "Policy", policyValue, policyOK, data.policyAPIErr)
@@ -173,6 +185,18 @@ func bucketImpactViewer(data *bucketImpact, err error) viewer.Viewer {
 		summaryPanel.SetBody("summary unavailable: " + reason)
 	}
 	compound.AddViewer(summaryPanel)
+
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", data.bucketName))
+	if data.aiRecommendations != "" {
+		recommendationsPanel.SetBody(data.aiRecommendations)
+	} else {
+		reason := data.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	compound.AddViewer(recommendationsPanel)
 
 	if len(data.matches) == 0 {
 		compound.AddViewer(viewer.NewPanel().SetTitle("IAM Cross-Reference").SetBody("no customer-managed IAM policies reference this bucket"))

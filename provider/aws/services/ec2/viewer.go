@@ -138,6 +138,18 @@ func instanceInfoViewer(instance *instanceDefinition, err error) viewer.Viewer {
 	}
 	cTviewer.AddViewer(summaryPanel)
 
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", *instance.summary.id))
+	if instance.aiRecommendations != "" {
+		recommendationsPanel.SetBody(instance.aiRecommendations)
+	} else {
+		reason := instance.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	cTviewer.AddViewer(recommendationsPanel)
+
 	cTviewer.AddViewer(renderInstanceSummary(instance.summary))
 	cTviewer.AddViewer(renderInstanceDetails(instance.detail))
 	cTviewer.AddViewers(renderInstanceRulesSummary(instance.ruleSummary))
@@ -345,6 +357,18 @@ func sgExplainViewer(data *sgExplanation, err error) viewer.Viewer {
 		summaryPanel.SetBody("summary unavailable: " + reason)
 	}
 	compound.AddViewer(summaryPanel)
+
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", *data.sgId))
+	if data.aiRecommendations != "" {
+		recommendationsPanel.SetBody(data.aiRecommendations)
+	} else {
+		reason := data.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	compound.AddViewer(recommendationsPanel)
 
 	compound.AddViewer(renderInstanceIngressRules(data.ingressRules))
 	compound.AddViewer(renderInstanceEgressRules(data.egressRules))

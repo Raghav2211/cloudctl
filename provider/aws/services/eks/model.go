@@ -39,6 +39,9 @@ type clusterDefinition struct {
 
 	aiSummary            string
 	aiSummaryUnavailable string
+
+	aiRecommendations            string
+	aiRecommendationsUnavailable string
 }
 
 func newClusterSummary(name string) *clusterSummary {
@@ -102,5 +105,15 @@ func (def *clusterDefinition) SetAISummary(summary string) *clusterDefinition {
 
 func (def *clusterDefinition) SetAISummaryUnavailable(reason string) *clusterDefinition {
 	def.aiSummaryUnavailable = reason
+	return def
+}
+
+func (def *clusterDefinition) SetAIRecommendations(recommendations string) *clusterDefinition {
+	def.aiRecommendations = recommendations
+	return def
+}
+
+func (def *clusterDefinition) SetAIRecommendationsUnavailable(reason string) *clusterDefinition {
+	def.aiRecommendationsUnavailable = reason
 	return def
 }

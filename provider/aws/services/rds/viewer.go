@@ -47,6 +47,18 @@ func dbDefinitionViewer(data *dbDefinition, err error) viewer.Viewer {
 	}
 	compound.AddViewer(summaryPanel)
 
+	recommendationsPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Recommendations for %s (Recommendation — a human must apply these)", derefStr(data.identifier)))
+	if data.aiRecommendations != "" {
+		recommendationsPanel.SetBody(data.aiRecommendations)
+	} else {
+		reason := data.aiRecommendationsUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
+	}
+	compound.AddViewer(recommendationsPanel)
+
 	dataPanel := viewer.NewPanel().SetTitle("Database Configuration")
 	dataPanel.AddEntry("Kind", data.kind)
 	dataPanel.AddEntry("Engine", derefStr(data.engine))

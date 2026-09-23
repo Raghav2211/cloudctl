@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -55,12 +56,23 @@ func NewBucketViewCommandExecutor(cfg aws.Config, bucketName string) *executor.C
 	}
 }
 
+func NewBucketImpactCommandExecutor(cfg aws.Config, bucketName string) *executor.CommandExecutor[*bucketImpact] {
+	return &executor.CommandExecutor[*bucketImpact]{
+		Fetcher: &bucketImpactFetcher{
+			client:     iam.NewFromConfig(cfg),
+			bucketName: bucketName,
+		},
+		Viewer: bucketImpactViewer,
+	}
+}
+
 func NewBucketObjectDownloadCommandExecutor(cfg aws.Config, bucketName, key, path string, recursive bool) *executor.CommandExecutor[*bucketOjectsDownloadSummary] {
+	client := s3.NewFromConfig(cfg)
 
 	return &executor.CommandExecutor[*bucketOjectsDownloadSummary]{
 		Fetcher: &bucketObjectsDownloadFetcher{
-			client:     s3.NewFromConfig(cfg),
-			downloader: manager.NewDownloader(s3.NewFromConfig(cfg)),
+			client:     client,
+			downloader: manager.NewDownloader(client),
 			bucketName: bucketName,
 			key:        key,
 			path:       path,

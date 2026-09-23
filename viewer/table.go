@@ -10,17 +10,11 @@ import (
 
 type Row []interface{}
 
-type embedError struct {
-	err       error
-	errorType ErrorType
-}
-
 type TableViewer struct {
-	title      string
-	header     table.Row
-	rows       []table.Row
-	embedError embedError
-	style      TableStyle
+	title  string
+	header table.Row
+	rows   []table.Row
+	style  TableStyle
 }
 
 type TableStyle struct {
@@ -90,15 +84,11 @@ func (t *TableViewer) SetStyle(style TableStyle) *TableViewer {
 	return t
 }
 
-func (t *TableViewer) SetError(err error, errorType ErrorType) *TableViewer {
-	t.embedError = embedError{
-		err:       err,
-		errorType: errorType,
-	}
-	return t
+func (t *TableViewer) IsErrorView() bool {
+	return false
 }
 
-func (t *TableViewer) IsErrorView() bool {
+func (t *TableViewer) IsFailure() bool {
 	return false
 }
 

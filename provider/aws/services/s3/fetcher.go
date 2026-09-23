@@ -8,19 +8,15 @@ import (
 	itime "cloudctl/time"
 	"cloudctl/viewer"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
-	"sync"
 	"time"
-
-	"log"
 
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/aws/smithy-go"
+	"golang.org/x/sync/errgroup"
 )
 
 type bucketListFetcher struct {
@@ -46,13 +42,22 @@ type bucketConfigurationFetcher struct {
 }
 
 type bucketObjectsDownloadFetcher struct {
-	client     *s3.Client
+	client     listObjectsAPI
 	downloader *manager.Downloader
 	bucketName string
 	key        string
 	path       string
 	recursive  bool
 }
+
+// maxConcurrentObjectDownloads bounds how many objects download at once in
+// the recursive path. Unbounded fan-out here would open one goroutine, one
+// file handle, and one network connection per object simultaneously — for a
+// prefix with thousands of objects that's a real resource-exhaustion risk.
+// Bounded to the same order of magnitude as the other bounded fan-out sites
+// in this codebase (CloudWatch stats @8, IAM policy checks @5) — see
+// ADR-0018.
+const maxConcurrentObjectDownloads = 8
 
 func (f bucketListFetcher) Fetch(ctx context.Context) (*bucketListOutput, error) {
 	apiOutput, err := listBucket(ctx, f.client, f.requestTimeout)
@@ -198,7 +203,6 @@ func (f bucketConfigurationFetcher) Fetch(ctx context.Context) (*bucketDefinitio
 // Fetch so this exact integration point (evidence in, AI client behavior,
 // bucketDefinition fields out) is directly testable without a real AWS call.
 func (definition *bucketDefinition) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
-	log.Printf("Evidence, %v", facts)
 	if len(facts) == 0 {
 		definition.SetAISummaryUnavailable("no evidence could be gathered (all fetches failed)")
 		return
@@ -212,12 +216,6 @@ func (definition *bucketDefinition) applyAISummary(ctx context.Context, client *
 }
 
 func (f bucketObjectsDownloadFetcher) Fetch(ctx context.Context) (*bucketOjectsDownloadSummary, error) {
-	objectDownloadSummaryChan := make(chan *objectDownloadSummary, 100) // Buffered channel
-	objectsDownloadSummary := []*objectDownloadSummary{}
-
-	// Ensure channel is closed after all operations complete
-	defer close(objectDownloadSummaryChan)
-
 	if f.recursive {
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &f.bucketName
@@ -230,51 +228,47 @@ func (f bucketObjectsDownloadFetcher) Fetch(ctx context.Context) (*bucketOjectsD
 			return nil, aws.NewErrorInfo(NoObjectFoundWithGivenPrefix(f.bucketName, f.key), viewer.WARN, nil)
 		}
 
-		// Use WaitGroup to ensure all downloads complete
-		var wg sync.WaitGroup
-		wg.Add(len(apiOutput.Contents))
-
-		// Launch download goroutines
-		for _, object := range apiOutput.Contents {
-			go func(objKey string) {
-				defer wg.Done()
-				downloadObject(ctx, f.bucketName, objKey, f.path, f.downloader, objectDownloadSummaryChan)
-			}(*object.Key)
+		// Bounded fan-out (ADR-0018): each goroutine writes its own
+		// pre-assigned slice index, so there's no data race despite no
+		// mutex, and no channel/collection-deadline is needed — overall
+		// wait time is naturally bounded by the semaphore instead of an
+		// arbitrary fixed timeout. Mirrors statisticsFetcher.Fetch and
+		// bucketImpactFetcher.Fetch.
+		g, gCtx := errgroup.WithContext(ctx)
+		sem := make(chan struct{}, maxConcurrentObjectDownloads)
+		summaries := make([]*objectDownloadSummary, len(apiOutput.Contents))
+		for i, object := range apiOutput.Contents {
+			i, objKey := i, *object.Key
+			g.Go(func() error {
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				summaries[i] = downloadObjectResult(gCtx, f.bucketName, objKey, f.path, f.downloader)
+				return nil
+			})
 		}
+		_ = g.Wait() // per-object errors are carried in each summary's err field, not fatal to the batch
 
-		// Wait for all downloads to complete
-		wg.Wait()
-
-		// Collect all results, bounded by one shared 30s deadline for the
-		// whole collection phase (not 30s per remaining item).
-		collectDeadline := time.After(30 * time.Second)
-	collectLoop:
-		for i := 0; i < len(apiOutput.Contents); i++ {
-			select {
-			case summary := <-objectDownloadSummaryChan:
-				objectsDownloadSummary = append(objectsDownloadSummary, summary)
-			case <-collectDeadline:
-				break collectLoop
-			}
-		}
-
-		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary}, nil
+		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: summaries}, nil
 	}
 
-	// Single object download
+	// Single object download — no fan-out, unaffected by ADR-0018.
+	objectDownloadSummaryChan := make(chan *objectDownloadSummary, 1)
 	go downloadObject(ctx, f.bucketName, f.key, f.path, f.downloader, objectDownloadSummaryChan)
 
 	select {
 	case summary := <-objectDownloadSummaryChan:
-		objectsDownloadSummary = append(objectsDownloadSummary, summary)
+		return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: []*objectDownloadSummary{summary}}, nil
 	case <-time.After(30 * time.Second): // Timeout protection
 		return nil, aws.NewErrorInfo(fmt.Errorf("download timeout"), viewer.ERROR, nil)
 	}
-
-	return &bucketOjectsDownloadSummary{bucketName: f.bucketName, objectsDownloadSummary: objectsDownloadSummary}, nil
 }
 
-func downloadObject(ctx context.Context, bucketName, key, path string, downloader *manager.Downloader, downloadSummaryChan chan<- *objectDownloadSummary) {
+// downloadObjectResult downloads one object and returns its summary
+// directly — the synchronous core shared by both the single-object path
+// (via the downloadObject channel wrapper below) and the bounded recursive
+// fan-out, which writes results straight into a pre-sized slice instead of
+// coordinating through a channel.
+func downloadObjectResult(ctx context.Context, bucketName, key, path string, downloader *manager.Downloader) *objectDownloadSummary {
 	start := time.Now()
 	downloadFileAbsPath := fmt.Sprintf("%s/%s", path, key)
 
@@ -292,8 +286,7 @@ func downloadObject(ctx context.Context, bucketName, key, path string, downloade
 		if file != nil {
 			file.Close()
 		}
-		downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(err, viewer.ERROR, nil))
-		return
+		return newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(err, viewer.ERROR, nil))
 	}
 
 	// Ensure file is closed after download
@@ -304,19 +297,20 @@ func downloadObject(ctx context.Context, bucketName, key, path string, downloade
 		Key:    &key,
 	})
 	if err != nil {
-		downloadSummaryChan <- newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil))
-	} else {
-		downloadSummaryChan <- newBucketObjectDownloadSummary(key, file.Name(), numBytesWrite, time.Since(start), nil)
+		return newBucketObjectDownloadSummary(key, "", 0, time.Since(start), aws.NewErrorInfo(aws.AWSError(err), viewer.ERROR, nil))
 	}
+	return newBucketObjectDownloadSummary(key, file.Name(), numBytesWrite, time.Since(start), nil)
+}
+
+// downloadObject wraps downloadObjectResult for the single-object download
+// path, which coordinates via a channel rather than a pre-sized slice.
+func downloadObject(ctx context.Context, bucketName, key, path string, downloader *manager.Downloader, downloadSummaryChan chan<- *objectDownloadSummary) {
+	downloadSummaryChan <- downloadObjectResult(ctx, bucketName, key, path, downloader)
 }
 
 func getBucketPolicy(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketPolicyOutput, error) {
 	res, err := client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{Bucket: bucket})
 	if err != nil {
-		var apiErr smithy.APIError
-		if errors.As(err, &apiErr) {
-			fmt.Println("errCode", apiErr.ErrorCode(), " message ", apiErr.ErrorMessage())
-		}
 		return nil, err
 	}
 	return res, nil
@@ -348,9 +342,7 @@ func getBucketencryptionConfig(ctx context.Context, bucket *string, client bucke
 
 func getBucketLifecycleConfig(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketLifecycleConfigurationOutput, error) {
 	res, err := client.GetBucketLifecycleConfiguration(ctx, &s3.GetBucketLifecycleConfigurationInput{Bucket: bucket})
-
 	if err != nil {
-		fmt.Println("Error message", err.Error())
 		return nil, err
 	}
 	return res, nil

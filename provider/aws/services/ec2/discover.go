@@ -1,8 +1,6 @@
 package ec2
 
 import (
-	"cloudctl/provider/aws"
-	"cloudctl/provider/aws/cli/globals"
 	"cloudctl/snapshot"
 	"context"
 
@@ -13,13 +11,12 @@ import (
 // for `ctl discover aws`. Each instance's full raw SDK representation is
 // preserved in Attrs (§10: attrs_json preserves provider-specific detail
 // rather than a hand-picked field subset).
-func Discover(ctx context.Context, flag *globals.AWSCLIFlag) ([]snapshot.Resource, error) {
-	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, true))
-	if err != nil {
-		return nil, err
-	}
-	client := ec2.NewFromConfig(*cfg)
-
+//
+// Takes an already-constructed client rather than building its own session
+// (ADR-013) — `ctl discover aws` needs both EC2 and S3 data in one
+// invocation, so the CLI layer builds one session and passes clients to
+// both, instead of each Discover function resolving credentials separately.
+func Discover(ctx context.Context, client ec2.DescribeInstancesAPIClient) ([]snapshot.Resource, error) {
 	instances, err := fetchInstanceList(ctx, client, InstanceListFilter{})
 	if err != nil {
 		return nil, err

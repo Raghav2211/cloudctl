@@ -49,7 +49,7 @@ func ErrorView(err error) *viewer.ErrorViewer {
 func AWSError(err error) error {
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {
-		return fmt.Errorf("[code:%s, message:%s]", apiErr.ErrorCode(), apiErr.ErrorMessage())
+		return fmt.Errorf("[code:%s, message:%s]: %w", apiErr.ErrorCode(), apiErr.ErrorMessage(), err)
 	}
 	return fmt.Errorf("something wrong, need to find out what | actual err %w", err)
 }

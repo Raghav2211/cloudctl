@@ -12,8 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
-func NewinstanceListCommandExecutor(flag *globals.AWSCLIFlag, tzIdentifier string, filter InstanceListFilter) (*executor.CommandExecutor[*instanceListOutput], error) {
-	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, true))
+func NewinstanceListCommandExecutor(flag *globals.AWSCLIFlag, debug bool, tzIdentifier string, filter InstanceListFilter) (*executor.CommandExecutor[*instanceListOutput], error) {
+	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, debug))
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +47,8 @@ func NewInstanceListFromSnapshotCommandExecutor(tzIdentifier string, filter Inst
 	}, nil
 }
 
-func NewInstanceDescribeCommandExecutor(flag *globals.AWSCLIFlag, tzIdentifier string, instanceId string) (*executor.CommandExecutor[*instanceDefinition], error) {
-	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, true))
+func NewInstanceDescribeCommandExecutor(flag *globals.AWSCLIFlag, debug bool, tzIdentifier string, instanceId string) (*executor.CommandExecutor[*instanceDefinition], error) {
+	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, debug))
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +63,8 @@ func NewInstanceDescribeCommandExecutor(flag *globals.AWSCLIFlag, tzIdentifier s
 	}, nil
 }
 
-func NewEC2StatisticsDescribeCommandExecutor(flag *globals.AWSCLIFlag, tzIdentifier string) (*executor.CommandExecutor[*instanceStatisticsListOutput], error) {
-	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, true))
+func NewEC2StatisticsDescribeCommandExecutor(flag *globals.AWSCLIFlag, debug bool, tzIdentifier string) (*executor.CommandExecutor[*instanceStatisticsListOutput], error) {
+	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, debug))
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +78,8 @@ func NewEC2StatisticsDescribeCommandExecutor(flag *globals.AWSCLIFlag, tzIdentif
 	}, nil
 }
 
-func NewSecurityGroupExplainCommandExecutor(flag *globals.AWSCLIFlag, sgId string) (*executor.CommandExecutor[*sgExplanation], error) {
-	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, true))
+func NewSecurityGroupExplainCommandExecutor(flag *globals.AWSCLIFlag, debug bool, sgId string) (*executor.CommandExecutor[*sgExplanation], error) {
+	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(*flag, debug))
 	if err != nil {
 		return nil, err
 	}

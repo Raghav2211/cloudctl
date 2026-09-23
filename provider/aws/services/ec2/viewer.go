@@ -125,6 +125,19 @@ func instanceInfoViewer(instance *instanceDefinition, err error) viewer.Viewer {
 	}
 
 	cTviewer := viewer.NewCompoundViewer()
+
+	summaryPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Summary for %s (Hypothesis — verify against the data below)", *instance.summary.id))
+	if instance.aiSummary != "" {
+		summaryPanel.SetBody(instance.aiSummary)
+	} else {
+		reason := instance.aiSummaryUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		summaryPanel.SetBody("summary unavailable: " + reason)
+	}
+	cTviewer.AddViewer(summaryPanel)
+
 	cTviewer.AddViewer(renderInstanceSummary(instance.summary))
 	cTviewer.AddViewer(renderInstanceDetails(instance.detail))
 	cTviewer.AddViewers(renderInstanceRulesSummary(instance.ruleSummary))
@@ -140,6 +153,7 @@ func ec2StatisticsViewer(data *instanceStatisticsListOutput, err error) viewer.V
 	}
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.AddHeader(instanceStatisticsTableHeader)
 	tViewer.SetTitle("Statistics")
 
@@ -168,6 +182,7 @@ func ec2StatisticsViewer(data *instanceStatisticsListOutput, err error) viewer.V
 func renderInstanceSummary(o *instanceSummary) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.SetTitle("Summary")
 	tViewer.AddHeader(instanceSummaryTableHeader)
 
@@ -189,6 +204,7 @@ func renderInstanceSummary(o *instanceSummary) *viewer.TableViewer {
 func renderInstanceDetails(o *instanceDetail) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.SetTitle("Details")
 	tViewer.AddHeader(instanceDetailsTableHeader)
 
@@ -216,6 +232,7 @@ func renderInstanceRulesSummary(summary *instanceIngressEgressRuleSummary) []vie
 func renderInstanceIngressRules(rules []*ingressRule) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.SetTitle("Ingress Rules")
 	tViewer.AddHeader(instanceSecurityGroupInboundSummaryTableHeader)
 
@@ -234,6 +251,7 @@ func renderInstanceIngressRules(rules []*ingressRule) *viewer.TableViewer {
 func renderInstanceEgressRules(rules []*egressRule) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.SetTitle("Egress Rules")
 	tViewer.AddHeader(instanceSecurityGroupOutboundSummaryTableHeader)
 	for _, rule := range rules {
@@ -254,6 +272,7 @@ func renderInstanceVolumeSummary(volumesSummary *instanceVolumeSummary) viewer.V
 	}
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.SetTitle("Volumes")
 	tViewer.AddHeader(instanceVolumeTableHeader)
 
@@ -265,7 +284,7 @@ func renderInstanceVolumeSummary(volumesSummary *instanceVolumeSummary) viewer.V
 				*volume.size,
 				*attachment.state,
 				*attachment.time,
-				volume.isEncrypt,
+				*volume.isEncrypt,
 				*volume.kmsKey,
 				*attachment.deleteOnTermination,
 			})
@@ -278,6 +297,7 @@ func renderInstanceVolumeSummary(volumesSummary *instanceVolumeSummary) viewer.V
 func renderInstanceNetworkSummary(instanceNetworkinterfaces []*instanceNetworkinterface) *viewer.TableViewer {
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.SetTitle("Networks")
 	tViewer.AddHeader(instanceNetworkSummaryTableHeader)
 
@@ -313,19 +333,19 @@ func sgExplainViewer(data *sgExplanation, err error) viewer.Viewer {
 	}
 
 	compound := viewer.NewCompoundViewer()
-	compound.AddViewer(viewer.FuncViewer(func() {
-		fmt.Printf("=== AI Summary for %s (Hypothesis — verify against the raw rules below) ===\n", *data.sgId)
-		if data.aiSummary != "" {
-			fmt.Println(data.aiSummary)
-		} else {
-			reason := data.aiSummaryUnavailable
-			if reason == "" {
-				reason = "not attempted"
-			}
-			fmt.Printf("summary unavailable: %s\n", reason)
+
+	summaryPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Summary for %s (Hypothesis — verify against the raw rules below)", *data.sgId))
+	if data.aiSummary != "" {
+		summaryPanel.SetBody(data.aiSummary)
+	} else {
+		reason := data.aiSummaryUnavailable
+		if reason == "" {
+			reason = "not attempted"
 		}
-		fmt.Println()
-	}))
+		summaryPanel.SetBody("summary unavailable: " + reason)
+	}
+	compound.AddViewer(summaryPanel)
+
 	compound.AddViewer(renderInstanceIngressRules(data.ingressRules))
 	compound.AddViewer(renderInstanceEgressRules(data.egressRules))
 	return compound

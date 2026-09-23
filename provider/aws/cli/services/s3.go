@@ -26,6 +26,11 @@ type bucketDefinitionCmd struct {
 	BucketName string `name:"name" arg:"required" help:"Bucket name"`
 }
 
+type bucketImpactCmd struct {
+	globals.AWSCLIFlag
+	BucketName string `name:"name" arg:"required" help:"Bucket name"`
+}
+
 type bucketObjectDownloadCmd struct {
 	globals.AWSCLIFlag
 	BucketName string `name:"name" arg:"required" help:"Bucket name"`
@@ -38,6 +43,7 @@ type S3Command struct {
 	List                 listCmd                 `name:"ls" cmd:"" help:"Return list s3 buckets"`
 	ListBucketObjects    listBucketObjectsCmd    `name:"list-objects" cmd:"" help:"Return list of objects of s3 bucket"`
 	BucketDefinition     bucketDefinitionCmd     `name:"def" cmd:"" help:"Return bucket definition"`
+	BucketImpact         bucketImpactCmd         `name:"impact" cmd:"" help:"Cross-reference IAM policies against this bucket and narrate the blast radius"`
 	BucketObjectDownload bucketObjectDownloadCmd `name:"get" cmd:"" help:"Download bucket object(s)"`
 }
 
@@ -76,6 +82,17 @@ func (cmd *bucketDefinitionCmd) Run(ctx context.Context, cli *global.CLIFlag) er
 	}
 
 	icmd := s3.NewBucketViewCommandExecutor(*session, cmd.BucketName)
+	return icmd.Execute(ctx)
+}
+
+func (cmd *bucketImpactCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
+	credentialConfig := aws.NewCredentialConfig(cmd.AWSCLIFlag, cli.Debug)
+	session, err := aws.NewSessionV2(credentialConfig)
+	if err != nil {
+		return err
+	}
+
+	icmd := s3.NewBucketImpactCommandExecutor(*session, cmd.BucketName)
 	return icmd.Execute(ctx)
 }
 

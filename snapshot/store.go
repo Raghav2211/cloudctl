@@ -152,6 +152,24 @@ func (s *Store) LatestSnapshotID(ctx context.Context, provider string) (int64, e
 	return id, nil
 }
 
+// SaveRelationship persists a discovered edge between two resources under
+// the given snapshot (e.g. an IAM principal's cross-referenced access to an
+// S3 bucket). evidenceJSON is the raw JSON that grounds the edge and may be
+// nil if there's nothing more specific to record than the edge itself.
+func (s *Store) SaveRelationship(ctx context.Context, snapshotID int64, sourceID, targetID, kind string, evidenceJSON []byte) error {
+	var ej any
+	if evidenceJSON != nil {
+		ej = string(evidenceJSON)
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO relationships (snapshot_id, source_id, target_id, kind, evidence_json) VALUES (?, ?, ?, ?, ?)`,
+		snapshotID, sourceID, targetID, kind, ej)
+	if err != nil {
+		return fmt.Errorf("saving relationship %s -> %s (%s): %w", sourceID, targetID, kind, err)
+	}
+	return nil
+}
+
 // ListResources returns every resource of resourceType stored under
 // snapshotID.
 func (s *Store) ListResources(ctx context.Context, snapshotID int64, resourceType string) ([]StoredResource, error) {

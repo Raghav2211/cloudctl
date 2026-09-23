@@ -65,7 +65,7 @@ func (cmd eC2ListCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
 		return icmd.Execute(ctx)
 	}
 
-	icmd, err := ec2.NewinstanceListCommandExecutor(&cmd.AWSCLIFlag, cli.TZShortIdentifier, *filter)
+	icmd, err := ec2.NewinstanceListCommandExecutor(&cmd.AWSCLIFlag, cli.Debug, cli.TZShortIdentifier, *filter)
 	if err != nil {
 		return err
 	}
@@ -73,7 +73,7 @@ func (cmd eC2ListCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
 }
 
 func (cmd instanceDefinitionCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
-	icmd, err := ec2.NewInstanceDescribeCommandExecutor(&cmd.AWSCLIFlag, cli.TZShortIdentifier, cmd.Id)
+	icmd, err := ec2.NewInstanceDescribeCommandExecutor(&cmd.AWSCLIFlag, cli.Debug, cli.TZShortIdentifier, cmd.Id)
 	if err != nil {
 		return err
 	}
@@ -81,15 +81,15 @@ func (cmd instanceDefinitionCmd) Run(ctx context.Context, cli *global.CLIFlag) e
 }
 
 func (cmd ec2DescribeStatisticsCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
-	icmd, err := ec2.NewEC2StatisticsDescribeCommandExecutor(&cmd.AWSCLIFlag, cli.TZShortIdentifier)
+	icmd, err := ec2.NewEC2StatisticsDescribeCommandExecutor(&cmd.AWSCLIFlag, cli.Debug, cli.TZShortIdentifier)
 	if err != nil {
 		return err
 	}
 	return icmd.Execute(ctx)
 }
 
-func (cmd sgExplainCmd) Run(ctx context.Context) error {
-	icmd, err := ec2.NewSecurityGroupExplainCommandExecutor(&cmd.AWSCLIFlag, cmd.Id)
+func (cmd sgExplainCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
+	icmd, err := ec2.NewSecurityGroupExplainCommandExecutor(&cmd.AWSCLIFlag, cli.Debug, cmd.Id)
 	if err != nil {
 		return err
 	}

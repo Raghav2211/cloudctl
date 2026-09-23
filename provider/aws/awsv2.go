@@ -85,6 +85,16 @@ func isInteractive() bool {
 	return term.IsTerminal(int(os.Stdin.Fd()))
 }
 
+// debugLog prints credential-resolution internals only when --debug is set.
+// Without this, every command printed several lines of "load from direct
+// credential" / "no credential provided, fallback on profiles" / etc. noise
+// on every invocation, regardless of --debug.
+func debugLog(debug bool, format string, args ...any) {
+	if debug {
+		log.Printf(format, args...)
+	}
+}
+
 // getRegion resolves the AWS region from the provided value or env vars,
 // prompting interactively only when stdin is a terminal; otherwise it fails
 // fast instead of blocking forever on a prompt nobody can answer.
@@ -108,7 +118,7 @@ func getRegion(region string) (string, error) {
 
 // load AWS Config from direct credential provided via command or from environment
 func loadConfigFromKeys(credential Credential, region string, debug bool) (aws.Config, error) {
-	log.Println("load from direct credential")
+	debugLog(debug, "load from direct credential")
 
 	// fetch accessKey from env `see:env_access_key` if not provide via command and `useEnv` is true
 	accessKey := getEnv(credential.AccessKey, env_access_key)
@@ -155,16 +165,16 @@ func NewSessionV2(credentialConfig CredentialConfig) (*aws.Config, error) {
 	if credentialConfig.Credential.hasKeys() || credentialConfig.useEnv {
 		cfg, err := loadConfigFromKeys(credentialConfig.Credential, region, credentialConfig.debug)
 		if err != nil {
-			log.Printf("failed to load direct credential, fallback to profile selection, %v", err)
+			debugLog(credentialConfig.debug, "failed to load direct credential, fallback to profile selection, %v", err)
 		} else if _, credErr := cfg.Credentials.Retrieve(context.Background()); credErr != nil {
-			log.Printf("failed to retrieve direct credential, fallback to profile selection, %v", credErr)
+			debugLog(credentialConfig.debug, "failed to retrieve direct credential, fallback to profile selection, %v", credErr)
 		} else {
-			log.Println("build config from direct credential")
+			debugLog(credentialConfig.debug, "build config from direct credential")
 			return &cfg, nil
 		}
 	}
 
-	log.Println("no credential provided, fallback on profiles")
+	debugLog(credentialConfig.debug, "no credential provided, fallback on profiles")
 
 	profile := getEnv(credentialConfig.Profile, env_profile)
 	if len(profile) == 0 {
@@ -185,10 +195,10 @@ func NewSessionV2(credentialConfig CredentialConfig) (*aws.Config, error) {
 		if err := survey.AskOne(prompt, &profile, survey.WithValidator(survey.Required)); err != nil {
 			return nil, fmt.Errorf("no profile selected: %w", err)
 		}
-		log.Printf("choose profile %s \n", profile)
+		debugLog(credentialConfig.debug, "choose profile %s \n", profile)
 	}
 
-	log.Printf("load profile from enviornment %s \n", profile)
+	debugLog(credentialConfig.debug, "load profile from enviornment %s \n", profile)
 	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion(region), config.WithSharedConfigProfile(profile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to load config for profile %q: %w", profile, err)

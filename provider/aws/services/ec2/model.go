@@ -155,6 +155,9 @@ type instanceDefinition struct {
 	volumesSummary    *instanceVolumeSummary
 	ruleSummary       *instanceIngressEgressRuleSummary
 	networkInterfaces []*instanceNetworkinterface
+
+	aiSummary            string
+	aiSummaryUnavailable string
 }
 
 type instanceListOutput struct {
@@ -455,5 +458,15 @@ func (def *instanceDefinition) SetInstanceIngressEgressRuleSummary(ruleSummary *
 
 func (def *instanceDefinition) SetNetworkInterfaces(interfaces []*instanceNetworkinterface) *instanceDefinition {
 	def.networkInterfaces = interfaces
+	return def
+}
+
+func (def *instanceDefinition) SetAISummary(summary string) *instanceDefinition {
+	def.aiSummary = summary
+	return def
+}
+
+func (def *instanceDefinition) SetAISummaryUnavailable(reason string) *instanceDefinition {
+	def.aiSummaryUnavailable = reason
 	return def
 }

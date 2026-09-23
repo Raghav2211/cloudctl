@@ -63,15 +63,11 @@ func TestApplyAISummary_LLMUnreachable_GracefulFallback(t *testing.T) {
 
 	// The raw data is still fully renderable even though AI failed — this
 	// is the whole point of ADR-010 (additive, never a hard dependency).
-	var anyVal interface{} = "x"
+	// Every field is left nil here (as if every dimension's fetch also
+	// failed) to confirm the render path is nil-safe, not just AI-failure-safe.
 	def.SetBucketName("my-bucket")
-	def.SetEncryptionConfig(anyVal)
-	def.SetVersion(anyVal)
-	def.SetTags(anyVal)
-	def.SetPolicy(anyVal)
-	def.SetLifeCycle(anyVal)
-	// Pretty() must not panic even though aiSummary is empty.
-	def.Pretty()
+	view := bucketConfigurationViewer(def, nil)
+	view.View() // must not panic even though every field is nil
 }
 
 // TestApplyAISummary_RealOllama_LivePath is a real (not mocked) end-to-end

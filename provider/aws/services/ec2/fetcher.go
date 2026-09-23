@@ -182,7 +182,28 @@ func fetchInstanceDefinition(ctx context.Context, instanceId *string, tz *ctltim
 		definition.SetNetworkInterfaces(networkinterfaces)
 	}
 	wg.Wait()
+
+	facts := instanceDefinitionEvidence(definition)
+	definition.applyAISummary(ctx, ai.NewClientFromEnv(), facts)
+
 	return definition, nil
+}
+
+// applyAISummary sets aiSummary or aiSummaryUnavailable from the given
+// evidence, never returning an error (ADR-010). Mirrors
+// sgExplanation.applyAISummary and bucketDefinition.applyAISummary in the s3
+// package.
+func (def *instanceDefinition) applyAISummary(ctx context.Context, client *ai.Client, facts []evidence.Evidence) {
+	if len(facts) == 0 {
+		def.SetAISummaryUnavailable("no evidence could be gathered")
+		return
+	}
+	summary, err := client.Summarize(ctx, facts)
+	if err != nil {
+		def.SetAISummaryUnavailable(err.Error())
+		return
+	}
+	def.SetAISummary(summary)
 }
 
 func fetchInstanceVolumeSummary(ctx context.Context, volumemappings []types.InstanceBlockDeviceMapping, client *ec2.Client) *instanceVolumeSummary {

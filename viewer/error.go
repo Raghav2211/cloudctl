@@ -31,6 +31,13 @@ func (e *ErrorViewer) SetErrorType(errorType ErrorType) *ErrorViewer {
 func (t *ErrorViewer) IsErrorView() bool {
 	return true
 }
+
+// IsFailure is true only for ERROR severity — WARN/INFO/DEBUG banners (e.g.
+// "no instances found", "bucket has more objects than max-keys") are
+// informational, not failures, and must not turn into a non-zero exit code.
+func (t *ErrorViewer) IsFailure() bool {
+	return t.errorType == ERROR
+}
 func (e *ErrorViewer) View() {
 	black := color.New(color.Attribute(e.errorType))
 	boldColor := black.Add(color.Bold)

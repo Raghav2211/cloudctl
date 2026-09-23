@@ -78,12 +78,12 @@ func TestBucketConfigurationFetcher_Fetch_NoNilFieldsOnSuccess(t *testing.T) {
 		}
 
 		// All 5 calls succeed in this fake, so every field should be the
-		// success (data) branch, never the error branch, and Pretty() must
+		// success (data) branch, never the error branch, and the viewer must
 		// render without panicking.
 		if def.policyAPIErr != nil || def.versionAPIErr != nil || def.tagsAPIError != nil ||
 			def.encryptionConfigAPIError != nil || def.lifeCycleAPIError != nil {
 			t.Fatalf("iteration %d: expected no errors on an all-success fetch, got def=%+v", i, def)
 		}
-		def.Pretty()
+		bucketConfigurationViewer(def, nil).View()
 	}
 }

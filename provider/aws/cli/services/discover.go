@@ -8,6 +8,8 @@ import (
 	"cloudctl/snapshot"
 	"context"
 	"fmt"
+
+	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 )
 
 type DiscoverAWSCmd struct {
@@ -16,7 +18,9 @@ type DiscoverAWSCmd struct {
 
 // Run discovers EC2 instances and S3 buckets and persists them into a local
 // snapshot, so later commands can query `--from-snapshot` instead of always
-// hitting live APIs (§9 Stage 1 / ADR-008).
+// hitting live APIs (§9 Stage 1 / ADR-008). Builds one session for both
+// providers (ADR-013), rather than each Discover function resolving
+// credentials separately.
 func (cmd DiscoverAWSCmd) Run(ctx context.Context) error {
 	store, err := snapshot.Open(snapshot.DefaultPath())
 	if err != nil {
@@ -29,15 +33,16 @@ func (cmd DiscoverAWSCmd) Run(ctx context.Context) error {
 		return err
 	}
 
-	ec2Resources, err := ec2.Discover(ctx, &cmd.AWSCLIFlag)
-	if err != nil {
-		return fmt.Errorf("discovering EC2 instances: %w", err)
-	}
-
 	cfg, err := aws.NewSessionV2(aws.NewCredentialConfig(cmd.AWSCLIFlag, false))
 	if err != nil {
 		return err
 	}
+
+	ec2Resources, err := ec2.Discover(ctx, awsec2.NewFromConfig(*cfg))
+	if err != nil {
+		return fmt.Errorf("discovering EC2 instances: %w", err)
+	}
+
 	s3Resources, err := s3.Discover(ctx, *cfg)
 	if err != nil {
 		return fmt.Errorf("discovering S3 buckets: %w", err)

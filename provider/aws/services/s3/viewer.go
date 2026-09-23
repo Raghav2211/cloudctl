@@ -5,6 +5,7 @@ import (
 	"cloudctl/viewer"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 var (
@@ -33,6 +34,7 @@ func bucketListViewer(data *bucketListOutput, err error) viewer.Viewer {
 	}
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.AddHeader(bucketListTableHeader)
 	tViewer.SetTitle("Buckets")
 	for _, bucket := range data.buckets {
@@ -52,6 +54,7 @@ func bucketObjectsViewer(data *bucketObjectListOutput, err error) viewer.Viewer 
 	compoundViewer := viewer.NewCompoundViewer()
 	if len(data.objects) > 0 {
 		tViewer := viewer.NewTableViewer()
+		tViewer.SetStyle(viewer.DefaultTableStyle())
 		tViewer.AddHeader(bucketObjectsTableHeader)
 		tViewer.SetTitle(*data.bucketName)
 
@@ -83,6 +86,7 @@ func bucketObjectsDownloadSummaryViewer(data *bucketOjectsDownloadSummary, err e
 	}
 
 	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
 	tViewer.AddHeader(bucketObjectsDownloadSummaryTableHeader)
 	tViewer.SetTitle(fmt.Sprintf("[%s]: Download Summary", data.bucketName))
 	for _, summary := range data.objectsDownloadSummary {
@@ -113,5 +117,98 @@ func bucketConfigurationViewer(data *bucketDefinition, err error) viewer.Viewer 
 	if err != nil {
 		return ctlaws.ErrorView(err)
 	}
-	return viewer.FuncViewer(data.Pretty)
+
+	compound := viewer.NewCompoundViewer()
+
+	summaryPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Summary for %s (Hypothesis — verify against the data below)", *data.bucketName))
+	if data.aiSummary != "" {
+		summaryPanel.SetBody(data.aiSummary)
+	} else {
+		reason := data.aiSummaryUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		summaryPanel.SetBody("summary unavailable: " + reason)
+	}
+	compound.AddViewer(summaryPanel)
+
+	dataPanel := viewer.NewPanel().SetTitle("Bucket Configuration")
+	policyValue, policyOK := formatPolicy(data.policy)
+	addBucketField(dataPanel, "Policy", policyValue, policyOK, data.policyAPIErr)
+	versionValue, versionOK := formatVersioning(data.version)
+	addBucketField(dataPanel, "Versioning", versionValue, versionOK, data.versionAPIErr)
+	tagsValue, tagsOK := formatTags(data.tags)
+	addBucketField(dataPanel, "Tags", tagsValue, tagsOK, data.tagsAPIError)
+	encryptionValue, encryptionOK := formatEncryption(data.encryptionConfig)
+	addBucketField(dataPanel, "Encryption", encryptionValue, encryptionOK, data.encryptionConfigAPIError)
+	lifecycleValue, lifecycleOK := formatLifecycle(data.lifecycle)
+	addBucketField(dataPanel, "Lifecycle", lifecycleValue, lifecycleOK, data.lifeCycleAPIError)
+	compound.AddViewer(dataPanel)
+
+	return compound
+}
+
+var bucketImpactTableHeader = viewer.Row{
+	"Policy",
+	"Effect",
+	"Actions",
+	"Principals",
+}
+
+func bucketImpactViewer(data *bucketImpact, err error) viewer.Viewer {
+	if err != nil {
+		return ctlaws.ErrorView(err)
+	}
+
+	compound := viewer.NewCompoundViewer()
+
+	summaryPanel := viewer.NewPanel().SetTitle(fmt.Sprintf("AI Risk Verdict for %s (Hypothesis — verify against the data below)", data.bucketName))
+	if data.aiSummary != "" {
+		summaryPanel.SetBody(data.aiSummary)
+	} else {
+		reason := data.aiSummaryUnavailable
+		if reason == "" {
+			reason = "not attempted"
+		}
+		summaryPanel.SetBody("summary unavailable: " + reason)
+	}
+	compound.AddViewer(summaryPanel)
+
+	if len(data.matches) == 0 {
+		compound.AddViewer(viewer.NewPanel().SetTitle("IAM Cross-Reference").SetBody("no customer-managed IAM policies reference this bucket"))
+		return compound
+	}
+
+	tViewer := viewer.NewTableViewer()
+	tViewer.SetStyle(viewer.DefaultTableStyle())
+	tViewer.SetTitle("IAM Cross-Reference (Inference — deterministic ARN match)")
+	tViewer.AddHeader(bucketImpactTableHeader)
+	for _, m := range data.matches {
+		tViewer.AddRow(viewer.Row{m.policyName, m.effect, strings.Join(m.actions, ", "), strings.Join(m.principals, ", ")})
+	}
+	compound.AddViewer(tViewer)
+
+	relPanel := viewer.NewPanel().SetTitle("Snapshot Store")
+	if data.relationshipsError != "" {
+		relPanel.SetBody("relationships not persisted: " + data.relationshipsError)
+	} else {
+		relPanel.SetBody(fmt.Sprintf("%d relationship edge(s) written to the snapshot store", data.relationshipsSaved))
+	}
+	compound.AddViewer(relPanel)
+
+	return compound
+}
+
+// addBucketField adds one bucket-configuration field to a panel: its
+// formatted value on success, the real fetch error on failure, or "none" if
+// neither a value nor an error was ever recorded.
+func addBucketField(panel *viewer.Panel, label string, formatted string, ok bool, apiErr error) {
+	switch {
+	case ok:
+		panel.AddEntry(label, formatted)
+	case apiErr != nil:
+		panel.AddEntry(label, "error: "+apiErr.Error())
+	default:
+		panel.AddEntry(label, "none")
+	}
 }

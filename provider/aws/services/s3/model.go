@@ -3,9 +3,9 @@ package s3
 import (
 	"cloudctl/provider/aws"
 	ctltime "cloudctl/time"
-	"fmt"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
@@ -46,15 +46,15 @@ type bucketObjectListOutput struct {
 
 type bucketDefinition struct {
 	bucketName               *string
-	policy                   *interface{}
+	policy                   *s3.GetBucketPolicyOutput
 	policyAPIErr             error
-	version                  *interface{}
+	version                  *s3.GetBucketVersioningOutput
 	versionAPIErr            error
-	tags                     *interface{}
+	tags                     *s3.GetBucketTaggingOutput
 	tagsAPIError             error
-	encryptionConfig         *interface{}
+	encryptionConfig         *s3.GetBucketEncryptionOutput
 	encryptionConfigAPIError error
-	lifecycle                *interface{}
+	lifecycle                *s3.GetBucketLifecycleConfigurationOutput
 	lifeCycleAPIError        error
 
 	// aiSummary is a Hypothesis-grade prose summary generated from the
@@ -76,7 +76,7 @@ func newBucketObjectOutput(o types.Object, tz *ctltime.Timezone) *bucketObjectOu
 	return &bucketObjectOutput{
 		key:          o.Key,
 		sizeInBytes:  o.Size,
-		storageClass: (*string)(&o.StorageClass.Values()[0]), // TODO : handle array
+		storageClass: (*string)(&o.StorageClass),
 		lastModified: tz.AdaptTimezone(o.LastModified),
 	}
 }
@@ -96,27 +96,27 @@ func (o *bucketDefinition) SetBucketName(bucketName string) *bucketDefinition {
 	return o
 }
 
-func (o *bucketDefinition) SetPolicy(data interface{}) *bucketDefinition {
-	o.policy = &data
+func (o *bucketDefinition) SetPolicy(data *s3.GetBucketPolicyOutput) *bucketDefinition {
+	o.policy = data
 	return o
 }
 
-func (o *bucketDefinition) SetVersion(data interface{}) *bucketDefinition {
-	o.version = &data
+func (o *bucketDefinition) SetVersion(data *s3.GetBucketVersioningOutput) *bucketDefinition {
+	o.version = data
 	return o
 }
 
-func (o *bucketDefinition) SetTags(data interface{}) *bucketDefinition {
-	o.tags = &data
+func (o *bucketDefinition) SetTags(data *s3.GetBucketTaggingOutput) *bucketDefinition {
+	o.tags = data
 	return o
 }
 
-func (o *bucketDefinition) SetEncryptionConfig(data interface{}) *bucketDefinition {
-	o.encryptionConfig = &data
+func (o *bucketDefinition) SetEncryptionConfig(data *s3.GetBucketEncryptionOutput) *bucketDefinition {
+	o.encryptionConfig = data
 	return o
 }
-func (o *bucketDefinition) SetLifeCycle(data interface{}) *bucketDefinition {
-	o.lifecycle = &data
+func (o *bucketDefinition) SetLifeCycle(data *s3.GetBucketLifecycleConfigurationOutput) *bucketDefinition {
+	o.lifecycle = data
 	return o
 }
 
@@ -152,47 +152,4 @@ func (o *bucketDefinition) SetAISummary(summary string) *bucketDefinition {
 func (o *bucketDefinition) SetAISummaryUnavailable(reason string) *bucketDefinition {
 	o.aiSummaryUnavailable = reason
 	return o
-}
-
-func (o bucketDefinition) Pretty() {
-	fmt.Println("=== AI Summary (Hypothesis — verify against the raw data below) ===")
-	if o.aiSummary != "" {
-		fmt.Println(o.aiSummary)
-	} else {
-		reason := o.aiSummaryUnavailable
-		if reason == "" {
-			reason = "not attempted"
-		}
-		fmt.Printf("summary unavailable: %s\n", reason)
-	}
-	fmt.Println()
-	fmt.Println("=== Raw Data ===")
-
-	if o.encryptionConfigAPIError != nil {
-		fmt.Println("encryptionConfigAPIError", o.encryptionConfigAPIError)
-	} else {
-		fmt.Println("encryptionConfig", *o.encryptionConfig)
-	}
-	if o.tagsAPIError != nil {
-		fmt.Println("tagsAPIError", o.tagsAPIError)
-	} else {
-		fmt.Println("tags", *o.tags)
-	}
-	if o.policyAPIErr != nil {
-		fmt.Println("policyAPIErr", o.policyAPIErr)
-	} else {
-		fmt.Println("policy", *o.policy)
-	}
-	if o.versionAPIErr != nil {
-		fmt.Println("versionAPIErr", o.versionAPIErr)
-	} else {
-		fmt.Println("versioning", *o.version)
-	}
-	if o.lifeCycleAPIError != nil {
-
-		fmt.Println("lifeCycleAPIError", o.lifeCycleAPIError)
-	} else {
-		fmt.Println("lifecycle", *o.lifecycle)
-	}
-
 }

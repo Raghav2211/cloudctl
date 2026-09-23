@@ -7,6 +7,13 @@ type ViewerFunc[T any] func(data T, err error) Viewer
 
 type Viewer interface {
 	IsErrorView() bool
+	// IsFailure reports whether this view represents a real failure the
+	// caller should be told about via a non-zero process exit code — true
+	// only for ERROR-severity content, never WARN/INFO/DEBUG. This is a
+	// separate signal from IsErrorView, which only controls rendering
+	// details (e.g. whether the "Time elapsed" footer prints) and stays
+	// true for every severity, exactly as before.
+	IsFailure() bool
 	View()
 }
 
@@ -15,6 +22,7 @@ type Viewer interface {
 type FuncViewer func()
 
 func (f FuncViewer) IsErrorView() bool { return false }
+func (f FuncViewer) IsFailure() bool   { return false }
 func (f FuncViewer) View()             { f() }
 
 func NewTableViewer() *TableViewer {

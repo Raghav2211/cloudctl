@@ -7,6 +7,7 @@ import (
 	"cloudctl/viewer"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/rds"
@@ -46,6 +47,7 @@ func isNotFound(err error) bool {
 func (f dbListFetcher) Fetch(ctx context.Context) (*dbListOutput, error) {
 	var items []*dbSummary
 
+	viewer.SetProgress(ctx, "Calling RDS DescribeDBInstances...")
 	instPaginator := rds.NewDescribeDBInstancesPaginator(f.client, &rds.DescribeDBInstancesInput{})
 	for instPaginator.HasMorePages() {
 		page, err := instPaginator.NextPage(ctx)
@@ -57,6 +59,7 @@ func (f dbListFetcher) Fetch(ctx context.Context) (*dbListOutput, error) {
 		}
 	}
 
+	viewer.SetProgress(ctx, "Calling RDS DescribeDBClusters...")
 	clusterPaginator := rds.NewDescribeDBClustersPaginator(f.client, &rds.DescribeDBClustersInput{})
 	for clusterPaginator.HasMorePages() {
 		page, err := clusterPaginator.NextPage(ctx)
@@ -79,6 +82,7 @@ func (f dbListFetcher) Fetch(ctx context.Context) (*dbListOutput, error) {
 // command but are otherwise distinct resource types with independent
 // identifier namespaces.
 func (f dbDefinitionFetcher) Fetch(ctx context.Context) (*dbDefinition, error) {
+	viewer.SetProgress(ctx, fmt.Sprintf("Calling RDS DescribeDBInstances for %s...", f.identifier))
 	instOut, err := f.client.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{DBInstanceIdentifier: &f.identifier})
 	if err == nil && len(instOut.DBInstances) > 0 {
 		def := newDBDefinitionFromInstance(instOut.DBInstances[0])
@@ -89,6 +93,7 @@ func (f dbDefinitionFetcher) Fetch(ctx context.Context) (*dbDefinition, error) {
 		return nil, ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
 	}
 
+	viewer.SetProgress(ctx, fmt.Sprintf("Calling RDS DescribeDBClusters for %s...", f.identifier))
 	clusterOut, err := f.client.DescribeDBClusters(ctx, &rds.DescribeDBClustersInput{DBClusterIdentifier: &f.identifier})
 	if err == nil && len(clusterOut.DBClusters) > 0 {
 		def := newDBDefinitionFromCluster(clusterOut.DBClusters[0])
@@ -117,7 +122,7 @@ func (def *dbDefinition) applyAINarration(ctx context.Context, client *ai.Client
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

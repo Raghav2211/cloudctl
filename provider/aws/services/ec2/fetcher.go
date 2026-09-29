@@ -95,6 +95,7 @@ func (f statisticsFetcher) Fetch(ctx context.Context) (*instanceStatisticsListOu
 		return nil, ctlaws.NewErrorInfo(NoInstanceFound(), viewer.INFO, nil)
 	}
 
+	viewer.SetProgress(ctx, fmt.Sprintf("Fetching CloudWatch CPU statistics for %d running instance(s)...", len(instances)))
 	currentTime := time.Now()
 	startTime := time.Date(currentTime.Year(), currentTime.Month(), currentTime.Day()-2, 0, 0, 0, 0, currentTime.Location())
 
@@ -117,6 +118,7 @@ func (f statisticsFetcher) Fetch(ctx context.Context) (*instanceStatisticsListOu
 }
 
 func fetchInstanceList(ctx context.Context, client ec2.DescribeInstancesAPIClient, instanceListFilter InstanceListFilter) ([]types.Instance, error) {
+	viewer.SetProgress(ctx, "Calling EC2 DescribeInstances...")
 	instances := []types.Instance{}
 	paginator := ec2.NewDescribeInstancesPaginator(client, &ec2.DescribeInstancesInput{
 		Filters: instanceListFilter.requestFilters(),
@@ -141,6 +143,7 @@ func fetchInstanceDefinition(ctx context.Context, instanceId *string, tz *ctltim
 	definition := newInstanceDefinition()
 	networkinterfaces := []*instanceNetworkinterface{}
 
+	viewer.SetProgress(ctx, fmt.Sprintf("Calling EC2 DescribeInstances for %s...", *instanceId))
 	data, err := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{InstanceIds: []string{*instanceId}})
 	if err != nil {
 		return nil, ctlaws.AWSError(err)
@@ -160,6 +163,7 @@ func fetchInstanceDefinition(ctx context.Context, instanceId *string, tz *ctltim
 	definition.SetInstanceSummary(newInstanceSummary(instance, tz))
 	definition.SetInstanceDetail(newInstanceDetail(instance, tz))
 
+	viewer.SetProgress(ctx, "Fetching volume and network interface details...")
 	wg := new(sync.WaitGroup)
 	if instance.BlockDeviceMappings != nil {
 		wg.Add(1)
@@ -205,7 +209,7 @@ func (def *instanceDefinition) applyAINarration(ctx context.Context, client *ai.
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -387,7 +391,7 @@ func (e *sgExplanation) applyAINarration(ctx context.Context, client *ai.Client,
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

@@ -64,3 +64,20 @@ func SetProgress(ctx context.Context, message string) {
 		s.Suffix = " " + message
 	}
 }
+
+// WithNestedProgress runs fn under progress reporting appropriate to
+// whether ctx already carries a running spinner from an enclosing
+// WithProgressSpinner call. If so, it just updates that spinner's message
+// (via SetProgress) and calls fn directly — avoiding a second,
+// visually-overlapping spinner. If ctx carries no spinner (e.g. a caller
+// that invokes a Fetcher directly, bypassing CommandExecutor.Execute —
+// see ec2.InvestigateInstanceDef, which the investigation agent's tools
+// use), it falls back to WithSpinner's own dedicated spinner so the
+// operation still shows a progress indicator on its own.
+func WithNestedProgress[T any](ctx context.Context, message string, fn func() (T, error)) (T, error) {
+	if _, ok := ctx.Value(spinnerCtxKey{}).(*spinner.Spinner); ok {
+		SetProgress(ctx, message)
+		return fn()
+	}
+	return WithSpinner(message, fn)
+}

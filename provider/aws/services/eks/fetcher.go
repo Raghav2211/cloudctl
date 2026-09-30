@@ -6,6 +6,7 @@ import (
 	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/eks"
@@ -30,6 +31,7 @@ type clusterDefinitionFetcher struct {
 }
 
 func (f clusterListFetcher) Fetch(ctx context.Context) (*clusterListOutput, error) {
+	viewer.SetProgress(ctx, "Calling EKS ListClusters...")
 	var names []string
 	paginator := eks.NewListClustersPaginator(f.client, &eks.ListClustersInput{})
 	for paginator.HasMorePages() {
@@ -57,6 +59,7 @@ func (f clusterListFetcher) Fetch(ctx context.Context) (*clusterListOutput, erro
 // command — the same partial-failure tolerance already established for
 // s3's bucketConfigurationFetcher and rds's PITR/TTL sub-fetches.
 func (f clusterDefinitionFetcher) Fetch(ctx context.Context) (*clusterDefinition, error) {
+	viewer.SetProgress(ctx, fmt.Sprintf("Calling EKS DescribeCluster for %s...", f.clusterName))
 	clusterOut, err := f.client.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: &f.clusterName})
 	if err != nil {
 		return nil, ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -66,6 +69,7 @@ func (f clusterDefinitionFetcher) Fetch(ctx context.Context) (*clusterDefinition
 	}
 	def := newClusterDefinition(*clusterOut.Cluster)
 
+	viewer.SetProgress(ctx, fmt.Sprintf("Listing node groups for %s...", f.clusterName))
 	var nodeGroupNames []string
 	ngPaginator := eks.NewListNodegroupsPaginator(f.client, &eks.ListNodegroupsInput{ClusterName: &f.clusterName})
 	for ngPaginator.HasMorePages() {
@@ -107,7 +111,7 @@ func (def *clusterDefinition) applyAINarration(ctx context.Context, client *ai.C
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

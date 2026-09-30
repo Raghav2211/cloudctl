@@ -77,6 +77,7 @@ func (f changeListFetcher) Fetch(ctx context.Context) (*changeListOutput, error)
 	needsClientSideEventNameFilter := f.eventName != "" && f.resourceName != ""
 	filtering := needsClientSideEventNameFilter || len(f.excludeEvents) > 0
 
+	viewer.SetProgress(ctx, "Calling CloudTrail LookupEvents...")
 	var events []*change
 	for {
 		remaining := limit - int32(len(events))
@@ -161,7 +162,7 @@ func (data *changeListOutput) applyAINarration(ctx context.Context, client *ai.C
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

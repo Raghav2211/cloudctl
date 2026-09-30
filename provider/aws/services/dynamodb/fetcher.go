@@ -33,6 +33,7 @@ type tableDefinitionFetcher struct {
 // ListTables has no SDK-provided paginator, unlike most List* operations in
 // this codebase.
 func (f tableListFetcher) Fetch(ctx context.Context) (*tableListOutput, error) {
+	viewer.SetProgress(ctx, "Calling DynamoDB ListTables...")
 	var names []string
 	var startTable *string
 	for {
@@ -113,7 +114,7 @@ func (def *tableDefinition) applyAINarration(ctx context.Context, client *ai.Cli
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

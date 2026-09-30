@@ -59,6 +59,7 @@ func (f functionStatisticsFetcher) Fetch(ctx context.Context) (*functionStatisti
 
 	stats := &functionStatistics{functionName: f.functionName}
 
+	viewer.SetProgress(ctx, fmt.Sprintf("Fetching CloudWatch statistics for %s...", f.functionName))
 	sum, err := f.sumMetric(ctx, "Invocations", start, end)
 	if err != nil {
 		stats.apiError = ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -122,7 +123,7 @@ func (stats *functionStatistics) applyAINarration(ctx context.Context, client *a
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

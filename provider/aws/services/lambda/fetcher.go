@@ -6,6 +6,7 @@ import (
 	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
@@ -31,6 +32,7 @@ type functionDefinitionFetcher struct {
 // has no SDK-provided paginator, unlike most List* operations in this
 // codebase (mirrors dynamodb's tableListFetcher.Fetch for the same reason).
 func (f functionListFetcher) Fetch(ctx context.Context) (*functionListOutput, error) {
+	viewer.SetProgress(ctx, "Calling Lambda ListFunctions...")
 	var functions []*functionSummary
 	var marker *string
 	for {
@@ -55,6 +57,7 @@ func (f functionListFetcher) Fetch(ctx context.Context) (*functionListOutput, er
 // Fetch retrieves a function's configuration and narrates it via
 // Summarize/Recommend, mirroring tableDefinitionFetcher.Fetch (dynamodb).
 func (f functionDefinitionFetcher) Fetch(ctx context.Context) (*functionDefinition, error) {
+	viewer.SetProgress(ctx, fmt.Sprintf("Calling Lambda GetFunctionConfiguration for %s...", f.functionName))
 	out, err := f.client.GetFunctionConfiguration(ctx, &lambda.GetFunctionConfigurationInput{FunctionName: &f.functionName})
 	if err != nil {
 		return nil, ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -80,7 +83,7 @@ func (def *functionDefinition) applyAINarration(ctx context.Context, client *ai.
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

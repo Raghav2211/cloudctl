@@ -10,6 +10,20 @@ import (
 	"golang.org/x/term"
 )
 
+// isInteractiveStdout and newSpinner are swappable seams. Production code
+// never overrides them; tests do, to prove which branch of WithSpinner /
+// WithProgressSpinner / WithNestedProgress actually ran (whether a new
+// spinner was constructed) without depending on a real terminal — plain
+// term.IsTerminal is always false under `go test`, so without this seam a
+// test can't tell "created its own spinner" apart from "did nothing".
+var isInteractiveStdout = func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+var newSpinner = func() *spinner.Spinner {
+	return spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+}
+
 // WithSpinner runs fn while showing an animated spinner with the given
 // message, for operations slow enough that users need feedback they're not
 // stuck — the local Ollama AI narration call can routinely take anywhere
@@ -22,8 +36,8 @@ import (
 // spinner output at all, so this never pollutes non-interactive output or
 // test logs.
 func WithSpinner[T any](message string, fn func() (T, error)) (T, error) {
-	if term.IsTerminal(int(os.Stdout.Fd())) {
-		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	if isInteractiveStdout() {
+		s := newSpinner()
 		s.Suffix = " " + message
 		s.Start()
 		defer s.Stop()
@@ -61,8 +75,8 @@ type spinnerState struct {
 // whole duration (which is what reads as "stuck" for a multi-second,
 // multi-call fetch).
 func WithProgressSpinner[T any](ctx context.Context, message string, fn func(ctx context.Context) (T, error)) (T, error) {
-	if term.IsTerminal(int(os.Stdout.Fd())) {
-		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+	if isInteractiveStdout() {
+		s := newSpinner()
 		state := &spinnerState{message: message}
 		s.Suffix = " " + message
 		s.PreUpdate = func(sp *spinner.Spinner) {

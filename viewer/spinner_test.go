@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/briandowns/spinner"
 )
 
 func TestWithProgressSpinner_ReturnsFnResult(t *testing.T) {
@@ -38,7 +42,31 @@ func TestSetProgress_NoSpinnerInContext(t *testing.T) {
 	SetProgress(context.Background(), "should be a no-op")
 }
 
+// withForcedSpinnerFactory forces the interactive-terminal check to true and
+// substitutes newSpinner with one that records whether it was called, then
+// restores both after the test — the seam TestWithNestedProgress_* tests use
+// to actually observe which branch fired, instead of relying on term.IsTerminal
+// (always false under `go test`, which is why these tests can't just check
+// real stdout output). The returned spinner writes to io.Discard so a forced
+// "interactive" run never leaks animation frames into test output even if
+// the library's own internal terminal check somehow passed.
+func withForcedSpinnerFactory(t *testing.T) *bool {
+	t.Helper()
+	origInteractive, origFactory := isInteractiveStdout, newSpinner
+	created := false
+	isInteractiveStdout = func() bool { return true }
+	newSpinner = func() *spinner.Spinner {
+		created = true
+		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond)
+		s.Writer = io.Discard
+		return s
+	}
+	t.Cleanup(func() { isInteractiveStdout, newSpinner = origInteractive, origFactory })
+	return &created
+}
+
 func TestWithNestedProgress_UpdatesExistingSpinnerInsteadOfCreatingNew(t *testing.T) {
+	created := withForcedSpinnerFactory(t)
 	state := &spinnerState{}
 	ctx := context.WithValue(context.Background(), spinnerCtxKey{}, state)
 
@@ -56,6 +84,9 @@ func TestWithNestedProgress_UpdatesExistingSpinnerInsteadOfCreatingNew(t *testin
 	state.mu.Unlock()
 	if gotMessage != "narrating..." {
 		t.Errorf("expected the existing spinner state's message to be updated to the nested message, got %q", gotMessage)
+	}
+	if *created {
+		t.Error("expected WithNestedProgress to update the existing spinner state instead of creating a new spinner")
 	}
 }
 
@@ -92,6 +123,8 @@ func TestSetProgress_ConcurrentCallsAreRaceFree(t *testing.T) {
 }
 
 func TestWithNestedProgress_FallsBackToOwnSpinnerWhenNoneInContext(t *testing.T) {
+	created := withForcedSpinnerFactory(t)
+
 	got, err := WithNestedProgress(context.Background(), "narrating...", func() (string, error) {
 		return "ok", nil
 	})
@@ -100,6 +133,9 @@ func TestWithNestedProgress_FallsBackToOwnSpinnerWhenNoneInContext(t *testing.T)
 	}
 	if got != "ok" {
 		t.Errorf("expected %q, got %q", "ok", got)
+	}
+	if !*created {
+		t.Error("expected WithNestedProgress's fallback branch to create its own spinner when ctx carries no spinnerState")
 	}
 }
 

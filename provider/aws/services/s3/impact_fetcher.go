@@ -8,6 +8,7 @@ import (
 	"cloudctl/viewer"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"sync"
 
@@ -61,6 +62,7 @@ func (f bucketImpactFetcher) Fetch(ctx context.Context) (*bucketImpact, error) {
 	impact := newBucketImpact(f.bucketName)
 	targetARN := bucketARN(f.bucketName)
 
+	viewer.SetProgress(ctx, "Calling IAM ListPolicies...")
 	var policies []types.Policy
 	paginator := iam.NewListPoliciesPaginator(f.client, &iam.ListPoliciesInput{Scope: types.PolicyScopeTypeLocal})
 	for paginator.HasMorePages() {
@@ -74,6 +76,7 @@ func (f bucketImpactFetcher) Fetch(ctx context.Context) (*bucketImpact, error) {
 	// Each policy's GetPolicyVersion + (for matches) ListEntitiesForPolicy is
 	// an independent round trip; per-index results avoid a data race on a
 	// shared append from goroutines, same pattern as ec2's statisticsFetcher.
+	viewer.SetProgress(ctx, fmt.Sprintf("Checking %d IAM polic(ies) for access to bucket %s...", len(policies), f.bucketName))
 	g, gCtx := errgroup.WithContext(ctx)
 	sem := make(chan struct{}, maxConcurrentIAMPolicyChecks)
 	results := make([]*policyMatch, len(policies))
@@ -191,7 +194,7 @@ func (impact *bucketImpact) applyAINarration(ctx context.Context, client *ai.Cli
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

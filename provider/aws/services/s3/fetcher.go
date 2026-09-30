@@ -94,6 +94,10 @@ type policyResult struct {
 	data *s3.GetBucketPolicyOutput
 	err  error
 }
+type policyStatusResult struct {
+	data *s3.GetBucketPolicyStatusOutput
+	err  error
+}
 type versionResult struct {
 	data *s3.GetBucketVersioningOutput
 	err  error
@@ -122,6 +126,7 @@ func (f bucketConfigurationFetcher) Fetch(ctx context.Context) (*bucketDefinitio
 	definition.SetBucketName(f.bucketName)
 
 	policyCh := make(chan policyResult, 1)
+	policyStatusCh := make(chan policyStatusResult, 1)
 	versionCh := make(chan versionResult, 1)
 	tagsCh := make(chan tagsResult, 1)
 	encryptionCh := make(chan encryptionResult, 1)
@@ -130,6 +135,10 @@ func (f bucketConfigurationFetcher) Fetch(ctx context.Context) (*bucketDefinitio
 	go func() {
 		data, err := getBucketPolicy(ctx, &f.bucketName, f.client)
 		policyCh <- policyResult{data: data, err: err}
+	}()
+	go func() {
+		data, err := getBucketPolicyStatus(ctx, &f.bucketName, f.client)
+		policyStatusCh <- policyStatusResult{data: data, err: err}
 	}()
 	go func() {
 		data, err := getBucketVersionConfig(ctx, &f.bucketName, f.client)
@@ -164,6 +173,11 @@ func (f bucketConfigurationFetcher) Fetch(ctx context.Context) (*bucketDefinitio
 	} else {
 		definition.SetPolicy(r.data)
 		policyData = r.data
+	}
+	if r := <-policyStatusCh; r.err != nil {
+		definition.SetPolicyStatusAPIError(r.err)
+	} else {
+		definition.SetPolicyStatus(r.data)
 	}
 	if r := <-versionCh; r.err != nil {
 		definition.SetVersionAPIError(r.err)
@@ -348,6 +362,19 @@ func downloadObject(ctx context.Context, bucketName, key, path string, downloade
 
 func getBucketPolicy(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketPolicyOutput, error) {
 	res, err := client.GetBucketPolicy(ctx, &s3.GetBucketPolicyInput{Bucket: bucket})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// getBucketPolicyStatus returns AWS's own computed answer to "is this
+// bucket's effective policy public" (factoring in Block Public Access and
+// the policy's full effect, not just its raw JSON) — a bucket with no
+// policy at all returns a NoSuchBucketPolicy-style error here, same as
+// getBucketPolicy, and is tolerated the same way (not public).
+func getBucketPolicyStatus(ctx context.Context, bucket *string, client bucketConfigurationAPI) (*s3.GetBucketPolicyStatusOutput, error) {
+	res, err := client.GetBucketPolicyStatus(ctx, &s3.GetBucketPolicyStatusInput{Bucket: bucket})
 	if err != nil {
 		return nil, err
 	}

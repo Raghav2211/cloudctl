@@ -20,13 +20,19 @@ func TestClusterDefinitionEvidence_FullyPopulated(t *testing.T) {
 	})
 	facts := clusterDefinitionEvidence(def)
 
-	// Version, Status, EndpointAccess, ClusterLogging + 1 NodeGroup fact
-	if len(facts) != 5 {
-		t.Fatalf("expected 5 facts, got %d: %+v", len(facts), facts)
+	// Version, Status, EndpointAccess, ClusterLogging + 1 NodeGroup fact + computed Health
+	if len(facts) != 6 {
+		t.Fatalf("expected 6 facts, got %d: %+v", len(facts), facts)
 	}
 	for _, f := range facts {
+		if f.Field == "Health" {
+			if f.Confidence != "INFERENCE" {
+				t.Errorf("expected the computed Health fact to be Inference-tagged, got %q", f.Confidence)
+			}
+			continue
+		}
 		if f.Confidence != "FACT" {
-			t.Errorf("expected all evidence to be Fact-tagged, got %q for field %q", f.Confidence, f.Field)
+			t.Errorf("expected all non-health evidence to be Fact-tagged, got %q for field %q", f.Confidence, f.Field)
 		}
 	}
 }

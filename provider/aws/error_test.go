@@ -49,6 +49,40 @@ func TestAWSError_NonAPIError_FallsBackToWrapping(t *testing.T) {
 	}
 }
 
+func TestAWSError_CategorizesKnownCodes(t *testing.T) {
+	cases := []struct {
+		code string
+		want ErrorCategory
+	}{
+		{"AccessDenied", CategoryPermission},
+		{"AccessDeniedException", CategoryPermission},
+		{"UnrecognizedClientException", CategoryAuthentication},
+		{"ExpiredTokenException", CategoryAuthentication},
+		{"ThrottlingException", CategoryThrottling},
+		{"SlowDown", CategoryThrottling},
+		{"NoSuchBucket", CategoryNotFound},
+		{"ResourceNotFoundException", CategoryNotFound},
+		{"SomeUnmappedCode", CategoryUnknown},
+	}
+	for _, c := range cases {
+		apiErr := &smithy.GenericAPIError{Code: c.code, Message: "boom"}
+		got := AWSError(apiErr)
+		wantPrefix := "[" + string(c.want) + "]"
+		if !strings.Contains(got.Error(), wantPrefix) {
+			t.Errorf("code %q: expected category %q in %q", c.code, c.want, got.Error())
+		}
+	}
+}
+
+func TestAWSError_NonAPIError_IsCategorizedConnectivity(t *testing.T) {
+	base := errors.New("connection reset")
+	got := AWSError(base)
+
+	if !strings.Contains(got.Error(), "[connectivity]") {
+		t.Errorf("expected a connectivity category for a non-API error, got %q", got.Error())
+	}
+}
+
 func TestErrorInfo_ImplementsError(t *testing.T) {
 	var err error = NewErrorInfo(errors.New("boom"), 0, nil)
 	if err.Error() != "boom" {

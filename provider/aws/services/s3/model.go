@@ -56,6 +56,14 @@ type bucketDefinition struct {
 	encryptionConfigAPIError error
 	lifecycle                *s3.GetBucketLifecycleConfigurationOutput
 	lifeCycleAPIError        error
+	// policyStatus is fetched separately from policy itself: AWS computes
+	// IsPublic from the full effect of the bucket policy plus any ACLs/
+	// account-level Block Public Access settings, which is far more
+	// reliable than trying to infer "is this public" by pattern-matching
+	// the raw policy JSON ourselves (see `security` package's public-
+	// bucket rule, which is the only consumer of this field).
+	policyStatus       *s3.GetBucketPolicyStatusOutput
+	policyStatusAPIErr error
 
 	// aiSummary is a Hypothesis-grade prose summary generated from the
 	// Fact-tagged evidence gathered above (see fetcher.go). It is additive,
@@ -120,6 +128,16 @@ func (o *bucketDefinition) SetEncryptionConfig(data *s3.GetBucketEncryptionOutpu
 }
 func (o *bucketDefinition) SetLifeCycle(data *s3.GetBucketLifecycleConfigurationOutput) *bucketDefinition {
 	o.lifecycle = data
+	return o
+}
+
+func (o *bucketDefinition) SetPolicyStatus(data *s3.GetBucketPolicyStatusOutput) *bucketDefinition {
+	o.policyStatus = data
+	return o
+}
+
+func (o *bucketDefinition) SetPolicyStatusAPIError(err error) *bucketDefinition {
+	o.policyStatusAPIErr = err
 	return o
 }
 

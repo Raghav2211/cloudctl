@@ -150,11 +150,36 @@ func instanceInfoViewer(instance *instanceDefinition, err error) viewer.Viewer {
 	}
 	cTviewer.AddViewer(recommendationsPanel)
 
+	h := instanceHealth(instance)
+	healthPanel := viewer.NewPanel().SetTitle("Health")
+	healthBody := string(h.Status)
+	if len(h.Reasons) > 0 {
+		healthBody += ": " + strings.Join(h.Reasons, "; ")
+	}
+	healthPanel.SetBody(healthBody)
+	cTviewer.AddViewer(healthPanel)
+
 	cTviewer.AddViewer(renderInstanceSummary(instance.summary))
 	cTviewer.AddViewer(renderInstanceDetails(instance.detail))
 	cTviewer.AddViewers(renderInstanceRulesSummary(instance.ruleSummary))
 	cTviewer.AddViewer(renderInstanceVolumeSummary(instance.volumesSummary))
 	cTviewer.AddViewer(renderInstanceNetworkSummary(instance.networkInterfaces))
+
+	relPanel := viewer.NewPanel().SetTitle("Snapshot Store")
+	if instance.relationshipsError != "" {
+		relPanel.SetBody("relationships not persisted: " + instance.relationshipsError)
+	} else {
+		relPanel.SetBody(fmt.Sprintf("%d relationship edge(s) written to the snapshot store", instance.relationshipsSaved))
+	}
+	cTviewer.AddViewer(relPanel)
+
+	if len(instance.relatedResources) > 0 {
+		relatedPanel := viewer.NewPanel().SetTitle("Related Resources")
+		for _, r := range instance.relatedResources {
+			relatedPanel.AddEntry(r.direction+" ("+r.kind+")", r.id)
+		}
+		cTviewer.AddViewer(relatedPanel)
+	}
 
 	return cTviewer
 }

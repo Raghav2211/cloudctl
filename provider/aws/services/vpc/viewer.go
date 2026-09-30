@@ -4,6 +4,7 @@ import (
 	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"fmt"
+	"strings"
 )
 
 var vpcListTableHeader = viewer.Row{
@@ -58,6 +59,15 @@ func vpcDefinitionViewer(data *vpcDefinition, err error) viewer.Viewer {
 		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
 	}
 	compound.AddViewer(recommendationsPanel)
+
+	h := vpcHealth(data)
+	healthPanel := viewer.NewPanel().SetTitle("Health")
+	healthBody := string(h.Status)
+	if len(h.Reasons) > 0 {
+		healthBody += ": " + strings.Join(h.Reasons, "; ")
+	}
+	healthPanel.SetBody(healthBody)
+	compound.AddViewer(healthPanel)
 
 	// This is genuinely hierarchical data (VPC -> subnets, gateways), so it
 	// renders as a real tree (Track H's viewer.Tree) instead of a flat table

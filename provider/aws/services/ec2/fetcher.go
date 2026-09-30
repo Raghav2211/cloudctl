@@ -4,6 +4,7 @@ import (
 	"cloudctl/ai"
 	"cloudctl/evidence"
 	ctlaws "cloudctl/provider/aws"
+	"cloudctl/snapshot"
 	ctltime "cloudctl/time"
 	"cloudctl/viewer"
 	"context"
@@ -187,10 +188,93 @@ func fetchInstanceDefinition(ctx context.Context, instanceId *string, tz *ctltim
 	}
 	wg.Wait()
 
+	definition.saveRelationships(ctx, *instanceId)
+	definition.loadRelatedResources(ctx, *instanceId)
+
 	facts := instanceDefinitionEvidence(definition)
 	definition.applyAINarration(ctx, ai.NewClientFromEnv(), facts)
 
 	return definition, nil
+}
+
+// saveRelationships is EC2's first write into the snapshot store's
+// relationships table (mirrors bucketImpact.saveRelationships in the s3
+// package, ADR-0016): every security group referenced by the instance's
+// network interfaces becomes an instanceID --ec2:security-group--> sgID
+// edge. Persistence is best-effort — no snapshot existing yet (nobody has
+// run `ctl discover aws`) is not a failure of this command, just a note
+// surfaced in the output.
+func (def *instanceDefinition) saveRelationships(ctx context.Context, instanceID string) {
+	if def.ruleSummary == nil {
+		return
+	}
+	sgIDs := map[string]struct{}{}
+	for _, r := range def.ruleSummary.ingressRules {
+		if r.sgId != nil {
+			sgIDs[*r.sgId] = struct{}{}
+		}
+	}
+	for _, r := range def.ruleSummary.egressRules {
+		if r.sgId != nil {
+			sgIDs[*r.sgId] = struct{}{}
+		}
+	}
+	if len(sgIDs) == 0 {
+		return
+	}
+
+	store, err := snapshot.Open(snapshot.DefaultPath())
+	if err != nil {
+		def.relationshipsError = err.Error()
+		return
+	}
+	defer store.Close()
+
+	snapshotID, err := store.LatestSnapshotID(ctx, "aws")
+	if err != nil {
+		def.relationshipsError = err.Error()
+		return
+	}
+
+	for sgID := range sgIDs {
+		if err := store.SaveRelationship(ctx, snapshotID, instanceID, sgID, "ec2:security-group", nil); err != nil {
+			def.relationshipsError = err.Error()
+			return
+		}
+		def.relationshipsSaved++
+	}
+}
+
+// loadRelatedResources looks up every relationship touching instanceID, in
+// both directions, from the local snapshot store — read-only, best-effort:
+// no snapshot yet or a lookup failure just leaves relatedResources empty
+// rather than failing the command (same discipline as saveRelationships).
+// Kept separate from saveRelationships so "nothing new to write" (the
+// common case) never needs to touch the store at all, while a lookup is
+// always attempted regardless of whether this instance itself has anything
+// new to contribute — something else may already reference it.
+func (def *instanceDefinition) loadRelatedResources(ctx context.Context, instanceID string) {
+	store, err := snapshot.Open(snapshot.DefaultPath())
+	if err != nil {
+		return
+	}
+	defer store.Close()
+
+	snapshotID, err := store.LatestSnapshotID(ctx, "aws")
+	if err != nil {
+		return
+	}
+
+	if from, err := store.ListRelationshipsFrom(ctx, snapshotID, instanceID); err == nil {
+		for _, r := range from {
+			def.relatedResources = append(def.relatedResources, relatedResource{direction: "depends on", kind: r.Kind, id: r.TargetID})
+		}
+	}
+	if to, err := store.ListRelationshipsTo(ctx, snapshotID, instanceID); err == nil {
+		for _, r := range to {
+			def.relatedResources = append(def.relatedResources, relatedResource{direction: "referenced by", kind: r.Kind, id: r.SourceID})
+		}
+	}
 }
 
 // applyAINarration sets the AI summary and recommendations (or their

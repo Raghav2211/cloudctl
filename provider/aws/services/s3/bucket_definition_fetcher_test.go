@@ -17,6 +17,10 @@ func (fakeBucketConfigurationClient) GetBucketPolicy(_ context.Context, _ *s3.Ge
 	return &s3.GetBucketPolicyOutput{Policy: aws.String(`{"Statement":[]}`)}, nil
 }
 
+func (fakeBucketConfigurationClient) GetBucketPolicyStatus(_ context.Context, _ *s3.GetBucketPolicyStatusInput, _ ...func(*s3.Options)) (*s3.GetBucketPolicyStatusOutput, error) {
+	return &s3.GetBucketPolicyStatusOutput{PolicyStatus: &types.PolicyStatus{IsPublic: aws.Bool(false)}}, nil
+}
+
 func (fakeBucketConfigurationClient) GetBucketVersioning(_ context.Context, _ *s3.GetBucketVersioningInput, _ ...func(*s3.Options)) (*s3.GetBucketVersioningOutput, error) {
 	return &s3.GetBucketVersioningOutput{Status: types.BucketVersioningStatusEnabled}, nil
 }
@@ -63,6 +67,9 @@ func TestBucketConfigurationFetcher_Fetch_NoNilFieldsOnSuccess(t *testing.T) {
 
 		if def.policy == nil && def.policyAPIErr == nil {
 			t.Fatalf("iteration %d: policy and policyAPIErr are both nil (the exact bug this test guards against)", i)
+		}
+		if def.policyStatus == nil && def.policyStatusAPIErr == nil {
+			t.Fatalf("iteration %d: policyStatus and policyStatusAPIErr are both nil", i)
 		}
 		if def.version == nil && def.versionAPIErr == nil {
 			t.Fatalf("iteration %d: version and versionAPIErr are both nil", i)

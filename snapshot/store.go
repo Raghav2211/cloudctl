@@ -101,6 +101,21 @@ CREATE TABLE IF NOT EXISTS relationships (
 );
 CREATE INDEX IF NOT EXISTS idx_resources_snapshot_type ON resources(snapshot_id, type);
 CREATE INDEX IF NOT EXISTS idx_relationships_snapshot_source ON relationships(snapshot_id, source_id);
+CREATE TABLE IF NOT EXISTS investigations (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	provider TEXT NOT NULL,
+	question TEXT NOT NULL,
+	stopped_reason TEXT NOT NULL,
+	conclusion TEXT NOT NULL,
+	summary TEXT NOT NULL,
+	summary_unavailable TEXT NOT NULL,
+	recommendations TEXT NOT NULL,
+	recommendations_unavailable TEXT NOT NULL,
+	steps_json TEXT NOT NULL,
+	evidence_json TEXT NOT NULL,
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_investigations_provider_created ON investigations(provider, created_at);
 `)
 	if err != nil {
 		return fmt.Errorf("migrating snapshot store schema: %w", err)
@@ -189,6 +204,57 @@ func (s *Store) ListResources(ctx context.Context, snapshotID int64, resourceTyp
 			return nil, fmt.Errorf("scanning resource row: %w", err)
 		}
 		r.AttrsJSON = []byte(attrsJSON)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// Relationship is a discovered edge between two resources, read back from
+// the store.
+type Relationship struct {
+	SourceID     string
+	TargetID     string
+	Kind         string
+	EvidenceJSON []byte // nil if SaveRelationship was called with nil evidence
+}
+
+// ListRelationshipsFrom returns every relationship whose source is sourceID
+// — e.g. "what does this resource depend on / reference".
+func (s *Store) ListRelationshipsFrom(ctx context.Context, snapshotID int64, sourceID string) ([]Relationship, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT source_id, target_id, kind, evidence_json FROM relationships WHERE snapshot_id = ? AND source_id = ?`,
+		snapshotID, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("listing relationships from %q: %w", sourceID, err)
+	}
+	defer rows.Close()
+	return scanRelationships(rows)
+}
+
+// ListRelationshipsTo returns every relationship whose target is targetID —
+// e.g. "what depends on / references this resource".
+func (s *Store) ListRelationshipsTo(ctx context.Context, snapshotID int64, targetID string) ([]Relationship, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT source_id, target_id, kind, evidence_json FROM relationships WHERE snapshot_id = ? AND target_id = ?`,
+		snapshotID, targetID)
+	if err != nil {
+		return nil, fmt.Errorf("listing relationships to %q: %w", targetID, err)
+	}
+	defer rows.Close()
+	return scanRelationships(rows)
+}
+
+func scanRelationships(rows *sql.Rows) ([]Relationship, error) {
+	var out []Relationship
+	for rows.Next() {
+		var r Relationship
+		var evidenceJSON sql.NullString // evidence_json is nullable (SaveRelationship may store nil)
+		if err := rows.Scan(&r.SourceID, &r.TargetID, &r.Kind, &evidenceJSON); err != nil {
+			return nil, fmt.Errorf("scanning relationship row: %w", err)
+		}
+		if evidenceJSON.Valid {
+			r.EvidenceJSON = []byte(evidenceJSON.String)
+		}
 		out = append(out, r)
 	}
 	return out, rows.Err()

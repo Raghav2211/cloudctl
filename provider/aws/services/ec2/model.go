@@ -174,6 +174,20 @@ type instanceDefinition struct {
 
 	aiRecommendations            string
 	aiRecommendationsUnavailable string
+
+	relationshipsSaved int
+	relationshipsError string
+	relatedResources   []relatedResource
+}
+
+// relatedResource is one edge touching this instance, read back from the
+// snapshot store for display — direction is a short human phrase ("depends
+// on" / "referenced by"), not an enum, since it's only ever rendered, never
+// branched on.
+type relatedResource struct {
+	direction string
+	kind      string
+	id        string
 }
 
 type instanceListOutput struct {

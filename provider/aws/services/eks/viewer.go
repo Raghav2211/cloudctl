@@ -57,6 +57,15 @@ func clusterDefinitionViewer(data *clusterDefinition, err error) viewer.Viewer {
 	}
 	compound.AddViewer(recommendationsPanel)
 
+	h := clusterHealth(data)
+	healthPanel := viewer.NewPanel().SetTitle("Health")
+	healthBody := string(h.Status)
+	if len(h.Reasons) > 0 {
+		healthBody += ": " + strings.Join(h.Reasons, "; ")
+	}
+	healthPanel.SetBody(healthBody)
+	compound.AddViewer(healthPanel)
+
 	dataPanel := viewer.NewPanel().SetTitle("Cluster Configuration")
 	dataPanel.AddEntry("Version", derefStr(data.version))
 	dataPanel.AddEntry("Status", derefStr(data.status))

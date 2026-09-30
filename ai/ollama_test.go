@@ -176,6 +176,75 @@ func TestRecommend_EmptyResponse(t *testing.T) {
 	}
 }
 
+func TestClassify_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req generateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if !strings.Contains(req.Prompt, "show running ec2 instances") {
+			t.Errorf("expected prompt to include the query, got: %s", req.Prompt)
+		}
+		if !strings.Contains(req.Prompt, "ec2 ls") {
+			t.Errorf("expected prompt to include the vocabulary, got: %s", req.Prompt)
+		}
+		json.NewEncoder(w).Encode(generateResponse{Response: `{"command":"ec2","subcommand":"ls","flags":{"state":"running"}}`})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "test-model")
+	got, err := client.Classify(context.Background(), "show running ec2 instances", "- ec2 ls: flags.state")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, `"command":"ec2"`) {
+		t.Errorf("expected the raw JSON response to pass through, got %q", got)
+	}
+}
+
+func TestClassify_NoQuery(t *testing.T) {
+	client := NewClient("http://unused.invalid", "test-model")
+	if _, err := client.Classify(context.Background(), "   ", "vocab"); err == nil {
+		t.Fatal("expected an error when no query is provided, got nil")
+	}
+}
+
+func TestAct_HappyPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req generateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if !strings.Contains(req.Prompt, "why is orders-db slow") {
+			t.Errorf("expected prompt to include the question, got: %s", req.Prompt)
+		}
+		if !strings.Contains(req.Prompt, "rds_stats") {
+			t.Errorf("expected prompt to include the registry, got: %s", req.Prompt)
+		}
+		if !strings.Contains(req.Prompt, "step 1: called rds_list") {
+			t.Errorf("expected prompt to include the history, got: %s", req.Prompt)
+		}
+		json.NewEncoder(w).Encode(generateResponse{Response: `{"step":"call_tool","tool":"rds_stats","args":{"identifier":"orders-db"},"reason":"check CPU"}`})
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "test-model")
+	got, err := client.Act(context.Background(), "why is orders-db slow", "- rds_stats: RDS CloudWatch stats\n", "- step 1: called rds_list -> orders-db found\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(got, `"tool":"rds_stats"`) {
+		t.Errorf("expected the raw JSON response to pass through, got %q", got)
+	}
+}
+
+func TestAct_NoQuestion(t *testing.T) {
+	client := NewClient("http://unused.invalid", "test-model")
+	if _, err := client.Act(context.Background(), "   ", "registry", ""); err == nil {
+		t.Fatal("expected an error when no question is provided, got nil")
+	}
+}
+
 func TestSummarize_RespectsContextCancellation(t *testing.T) {
 	blocked := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

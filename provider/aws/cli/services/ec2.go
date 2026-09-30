@@ -2,6 +2,7 @@ package services
 
 import (
 	"cloudctl/global"
+	"cloudctl/provider/aws"
 	"cloudctl/provider/aws/cli/globals"
 	"cloudctl/provider/aws/services/ec2"
 	"context"
@@ -33,11 +34,17 @@ type sgExplainCmd struct {
 	Id string `name:"name" arg:"required" help:"Security group ID (e.g. sg-0123456789abcdef0)"`
 }
 
+type instanceSecurityCmd struct {
+	globals.AWSCLIFlag
+	Id string `name:"name" arg:"required" help:"Instance ID"`
+}
+
 type EC2Command struct {
 	List               eC2ListCmd               `name:"ls" cmd:"" help:"List ec2 instances"`
 	InstacneDefinition instanceDefinitionCmd    `name:"def" cmd:"" help:"Get ec2 instance definition"`
 	DescribeStatistics ec2DescribeStatisticsCmd `name:"stats" cmd:"" help:"Get ec2 instance(s) statistics"`
 	Explain            sgExplainCmd             `name:"explain" cmd:"" help:"Explain a security group's rules using AI narration"`
+	Security           instanceSecurityCmd      `name:"security" cmd:"" help:"Run deterministic security checks (e.g. public IP with open ingress)"`
 }
 
 func (cmd eC2ListCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
@@ -93,5 +100,16 @@ func (cmd sgExplainCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
 	if err != nil {
 		return err
 	}
+	return icmd.Execute(ctx)
+}
+
+func (cmd instanceSecurityCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
+	credentialConfig := aws.NewCredentialConfig(cmd.AWSCLIFlag, cli.Debug)
+	session, err := aws.NewSessionV2(credentialConfig)
+	if err != nil {
+		return err
+	}
+
+	icmd := ec2.NewInstanceSecurityCommandExecutor(*session, cmd.Id)
 	return icmd.Execute(ctx)
 }

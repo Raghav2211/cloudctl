@@ -2,6 +2,7 @@ package eks
 
 import (
 	"cloudctl/evidence"
+	"cloudctl/health"
 	"fmt"
 	"strings"
 )
@@ -61,6 +62,22 @@ func clusterDefinitionEvidence(def *clusterDefinition) []evidence.Evidence {
 		})
 	}
 
+	facts = append(facts, healthEvidence(name, clusterHealth(def))...)
+
+	return facts
+}
+
+// healthEvidence converts a deterministic health.Assessment into
+// Inference-tagged evidence (it's derived via a fixed rule from Facts
+// already in this list, never an AI judgment) so the AI summary/
+// recommendations for this resource can reference its computed health.
+func healthEvidence(resourceID string, h health.Assessment) []evidence.Evidence {
+	facts := []evidence.Evidence{
+		{Source: "computed:health", ResourceID: resourceID, Field: "Health", Value: string(h.Status), Confidence: evidence.Inference},
+	}
+	for _, reason := range h.Reasons {
+		facts = append(facts, evidence.Evidence{Source: "computed:health", ResourceID: resourceID, Field: "HealthReason", Value: reason, Confidence: evidence.Inference})
+	}
 	return facts
 }
 

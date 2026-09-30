@@ -39,12 +39,18 @@ type bucketObjectDownloadCmd struct {
 	Recursive  bool   `name:"recursive" help:"This mode will download all objects recursively with provided key as prefix"`
 }
 
+type bucketSecurityCmd struct {
+	globals.AWSCLIFlag
+	BucketName string `name:"name" arg:"required" help:"Bucket name"`
+}
+
 type S3Command struct {
 	List                 listCmd                 `name:"ls" cmd:"" help:"Return list s3 buckets"`
 	ListBucketObjects    listBucketObjectsCmd    `name:"list-objects" cmd:"" help:"Return list of objects of s3 bucket"`
 	BucketDefinition     bucketDefinitionCmd     `name:"def" cmd:"" help:"Return bucket definition"`
 	BucketImpact         bucketImpactCmd         `name:"impact" cmd:"" help:"Cross-reference IAM policies against this bucket and narrate the blast radius"`
 	BucketObjectDownload bucketObjectDownloadCmd `name:"get" cmd:"" help:"Download bucket object(s)"`
+	Security             bucketSecurityCmd       `name:"security" cmd:"" help:"Run deterministic security checks (e.g. public bucket policy)"`
 }
 
 func (cmd *listCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
@@ -93,6 +99,17 @@ func (cmd *bucketImpactCmd) Run(ctx context.Context, cli *global.CLIFlag) error 
 	}
 
 	icmd := s3.NewBucketImpactCommandExecutor(*session, cmd.BucketName)
+	return icmd.Execute(ctx)
+}
+
+func (cmd *bucketSecurityCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
+	credentialConfig := aws.NewCredentialConfig(cmd.AWSCLIFlag, cli.Debug)
+	session, err := aws.NewSessionV2(credentialConfig)
+	if err != nil {
+		return err
+	}
+
+	icmd := s3.NewBucketSecurityCommandExecutor(*session, cmd.BucketName)
 	return icmd.Execute(ctx)
 }
 

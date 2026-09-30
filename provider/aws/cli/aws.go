@@ -11,4 +11,5 @@ type AWSCmd struct {
 	RDS      services.RDSCommand      `name:"rds" cmd:"" help:"Operation on RDS instances and clusters"`
 	VPC      services.VPCCommand      `name:"vpc" cmd:"" help:"Operation on VPCs"`
 	EKS      services.EKSCommand      `name:"eks" cmd:"" help:"Operation on EKS clusters"`
+	Lambda   services.LambdaCommand   `name:"lambda" cmd:"" help:"Operation on Lambda functions"`
 }

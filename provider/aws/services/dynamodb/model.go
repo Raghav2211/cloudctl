@@ -71,7 +71,7 @@ func newTableDefinition(table types.TableDescription) *tableDefinition {
 	}
 	def.billingMode = &billingMode
 
-	encryptionType := "default (DynamoDB owned key)"
+	encryptionType := defaultOwnedKeyEncryptionType
 	if table.SSEDescription != nil && table.SSEDescription.SSEType != "" {
 		encryptionType = string(table.SSEDescription.SSEType)
 	}

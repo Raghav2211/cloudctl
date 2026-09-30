@@ -17,9 +17,15 @@ type tableDefinitionCmd struct {
 	TableName string `name:"name" arg:"required" help:"Table name"`
 }
 
+type tableSecurityCmd struct {
+	globals.AWSCLIFlag
+	TableName string `name:"name" arg:"required" help:"Table name"`
+}
+
 type DynamoDBCommand struct {
 	List            tableListCmd       `name:"ls" cmd:"" help:"Return list of DynamoDB tables"`
 	TableDefinition tableDefinitionCmd `name:"def" cmd:"" help:"Return table definition"`
+	Security        tableSecurityCmd   `name:"security" cmd:"" help:"Run deterministic security checks (e.g. default encryption key)"`
 }
 
 func (cmd *tableListCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
@@ -41,5 +47,16 @@ func (cmd *tableDefinitionCmd) Run(ctx context.Context, cli *global.CLIFlag) err
 	}
 
 	icmd := dynamodb.NewTableDefinitionCommandExecutor(*session, cmd.TableName)
+	return icmd.Execute(ctx)
+}
+
+func (cmd *tableSecurityCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
+	credentialConfig := aws.NewCredentialConfig(cmd.AWSCLIFlag, cli.Debug)
+	session, err := aws.NewSessionV2(credentialConfig)
+	if err != nil {
+		return err
+	}
+
+	icmd := dynamodb.NewTableSecurityCommandExecutor(*session, cmd.TableName)
 	return icmd.Execute(ctx)
 }

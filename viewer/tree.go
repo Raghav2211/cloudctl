@@ -15,11 +15,17 @@ type Tree struct {
 	title string
 	root  *ltree.Tree
 	style TableStyle
+
+	rootLabel string
+	// children mirrors what's added to root — ltree.Tree doesn't expose a
+	// way to walk its own children back out, so this is tracked separately
+	// purely to support Structured() (--output json/yaml).
+	children []any
 }
 
 // NewTree starts a tree rooted at label (e.g. a VPC ID).
 func NewTree(label string) *Tree {
-	return &Tree{root: ltree.Root(label), style: DefaultTableStyle()}
+	return &Tree{root: ltree.Root(label), rootLabel: label, style: DefaultTableStyle()}
 }
 
 func (t *Tree) SetTitle(title string) *Tree {
@@ -37,9 +43,11 @@ func (t *Tree) SetStyle(style TableStyle) *Tree {
 func (t *Tree) Child(child any) *Tree {
 	if nested, ok := child.(*Tree); ok {
 		t.root.Child(nested.root)
+		t.children = append(t.children, nested)
 		return t
 	}
 	t.root.Child(child)
+	t.children = append(t.children, child)
 	return t
 }
 

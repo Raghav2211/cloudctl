@@ -108,9 +108,45 @@ func (c *Client) Recommend(ctx context.Context, facts []evidence.Evidence) (stri
 	return c.generate(ctx, "recommend", buildRecommendPrompt(facts))
 }
 
+// Classify maps a natural-language query to one of a fixed set of supported
+// intents, described by vocabulary, and returns the model's raw response —
+// expected to be a single JSON object, but Classify itself does not parse
+// or validate it.
+//
+// This is a selection, not narration: unlike Summarize/Recommend, the
+// result determines what runs next. Classify enforces nothing beyond "the
+// model was asked" — the caller MUST parse the response against its own
+// fixed schema and reject anything that doesn't match a known, whitelisted
+// intent before executing anything. The model is never trusted to gate its
+// own output.
+func (c *Client) Classify(ctx context.Context, query, vocabulary string) (string, error) {
+	if strings.TrimSpace(query) == "" {
+		return "", fmt.Errorf("classify: no query provided")
+	}
+	return c.generate(ctx, "classify", buildClassifyPrompt(query, vocabulary))
+}
+
+// Act asks the model to choose the single next step of a bounded, read-only
+// investigation loop: call one whitelisted tool, or conclude with a final
+// answer. registry describes the tools available (name, description,
+// required/optional args); history is a plain-text log of steps already
+// taken and what each returned.
+//
+// Like Classify, this is a selection, not narration: unlike Summarize/
+// Recommend, the result determines what runs next. Act enforces nothing
+// beyond "the model was asked" — the caller MUST validate the tool name and
+// args against its own fixed registry before executing anything. The model
+// is never trusted to gate its own output, nor to invoke anything directly.
+func (c *Client) Act(ctx context.Context, question, registry, history string) (string, error) {
+	if strings.TrimSpace(question) == "" {
+		return "", fmt.Errorf("act: no question provided")
+	}
+	return c.generate(ctx, "act", buildActPrompt(question, registry, history))
+}
+
 // generate is the shared /api/generate request/response plumbing behind
-// both Summarize and Recommend — only the prompt and error-message prefix
-// differ between the two.
+// Summarize, Recommend, and Classify — only the prompt and error-message
+// prefix differ between them.
 func (c *Client) generate(ctx context.Context, action, prompt string) (string, error) {
 	body, err := json.Marshal(generateRequest{
 		Model:  c.model,
@@ -158,6 +194,40 @@ func buildPrompt(facts []evidence.Evidence) string {
 	for _, f := range facts {
 		fmt.Fprintf(&b, "- [%s] %s = %v (source: %s)\n", f.Confidence, f.Field, f.Value, f.Source)
 	}
+	return b.String()
+}
+
+func buildClassifyPrompt(query, vocabulary string) string {
+	var b strings.Builder
+	b.WriteString("You are a strict command classifier for a read-only infrastructure CLI. You do not have opinions, you do not chat, and you never take action yourself.\n")
+	b.WriteString("You must map the user's request onto EXACTLY ONE of the supported intents listed below. Do not invent commands, flags, or values that are not listed.\n")
+	b.WriteString("Respond with ONLY a single JSON object — no prose, no markdown fences, no explanation before or after it.\n\n")
+	b.WriteString("Supported intents:\n")
+	b.WriteString(vocabulary)
+	b.WriteString("\n\nIf the request cannot be mapped onto exactly one supported intent, respond with:\n")
+	b.WriteString(`{"command":"","subcommand":"","flags":{},"unsupported_reason":"<short reason why>"}`)
+	b.WriteString("\n\nUser request: ")
+	b.WriteString(query)
+	return b.String()
+}
+
+func buildActPrompt(question, registry, history string) string {
+	var b strings.Builder
+	b.WriteString("You are a read-only infrastructure investigation agent. You do not have opinions, you do not chat, and you can NEVER take any action beyond calling the tools listed below.\n")
+	b.WriteString("You are investigating this question:\n")
+	b.WriteString(question)
+	b.WriteString("\n\nAvailable tools (call EXACTLY ONE per turn, using ONLY these names and args):\n")
+	b.WriteString(registry)
+	if strings.TrimSpace(history) == "" {
+		b.WriteString("\nNo steps have been taken yet.\n")
+	} else {
+		b.WriteString("\nSteps taken so far:\n")
+		b.WriteString(history)
+	}
+	b.WriteString("\nDecide the single next step. Respond with ONLY a single JSON object — no prose, no markdown fences, no explanation before or after it.\n")
+	b.WriteString("To call a tool: {\"step\":\"call_tool\",\"tool\":\"<tool name>\",\"args\":{...},\"reason\":\"<short reason>\"}\n")
+	b.WriteString("To conclude (once you have enough evidence, or no further tool call would help): {\"step\":\"conclude\",\"conclusion\":\"<short final answer grounded only in the steps taken so far>\"}\n")
+	b.WriteString("Never call a tool you already called with the exact same args. Never invent a tool name, arg name, or arg value that isn't listed above.\n")
 	return b.String()
 }
 

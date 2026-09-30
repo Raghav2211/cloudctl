@@ -132,3 +132,72 @@ func TestStore_SaveResource_ReplaceOnSameID(t *testing.T) {
 		t.Errorf("expected the second save to win, got state=%q", attrs["state"])
 	}
 }
+
+func TestStore_SaveAndListRelationships_RoundTrips(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	snapshotID, err := store.NewSnapshot(ctx, "aws")
+	if err != nil {
+		t.Fatalf("creating snapshot: %v", err)
+	}
+
+	if err := store.SaveRelationship(ctx, snapshotID, "i-abc123", "sg-111", "ec2:security-group", []byte(`{"note":"ingress"}`)); err != nil {
+		t.Fatalf("saving relationship: %v", err)
+	}
+	if err := store.SaveRelationship(ctx, snapshotID, "i-abc123", "sg-222", "ec2:security-group", nil); err != nil {
+		t.Fatalf("saving relationship: %v", err)
+	}
+	if err := store.SaveRelationship(ctx, snapshotID, "role/other", "sg-111", "some:other-kind", nil); err != nil {
+		t.Fatalf("saving relationship: %v", err)
+	}
+
+	from, err := store.ListRelationshipsFrom(ctx, snapshotID, "i-abc123")
+	if err != nil {
+		t.Fatalf("listing relationships from i-abc123: %v", err)
+	}
+	if len(from) != 2 {
+		t.Fatalf("expected 2 relationships from i-abc123, got %d", len(from))
+	}
+	var sawEvidence bool
+	for _, r := range from {
+		if r.TargetID == "sg-111" {
+			if string(r.EvidenceJSON) != `{"note":"ingress"}` {
+				t.Errorf("expected evidence JSON to round-trip, got %q", r.EvidenceJSON)
+			}
+			sawEvidence = true
+		}
+		if r.TargetID == "sg-222" && r.EvidenceJSON != nil {
+			t.Errorf("expected nil evidence to round-trip as nil, got %q", r.EvidenceJSON)
+		}
+	}
+	if !sawEvidence {
+		t.Error("expected to see the sg-111 relationship with its evidence")
+	}
+
+	to, err := store.ListRelationshipsTo(ctx, snapshotID, "sg-111")
+	if err != nil {
+		t.Fatalf("listing relationships to sg-111: %v", err)
+	}
+	if len(to) != 2 {
+		t.Fatalf("expected 2 relationships to sg-111 (type filter must not leak across sources), got %d", len(to))
+	}
+}
+
+func TestStore_ListRelationships_EmptyIsNotAnError(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	snapshotID, err := store.NewSnapshot(ctx, "aws")
+	if err != nil {
+		t.Fatalf("creating snapshot: %v", err)
+	}
+
+	from, err := store.ListRelationshipsFrom(ctx, snapshotID, "does-not-exist")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(from) != 0 {
+		t.Fatalf("expected 0 relationships, got %d", len(from))
+	}
+}

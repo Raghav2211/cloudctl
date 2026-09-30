@@ -35,7 +35,15 @@ func (exe *CommandExecutor[T]) Execute(ctx context.Context) error {
 		return exe.Fetcher.Fetch(ctx)
 	})
 	view := exe.Viewer(data, fetchErr)
-	view.View()
+
+	// In JSON/YAML mode, only the encoded data itself goes to stdout — no
+	// lipgloss render, no "Time elapsed" footer below — so automation
+	// piping the output (e.g. into jq) never has to deal with stray
+	// non-structured text mixed into the stream.
+	structured := renderStructured(view)
+	if !structured {
+		view.View()
+	}
 
 	// cmdErr drives the process exit code (via the caller's Run() -> kong ->
 	// FatalIfErrorf). It's computed independently of IsErrorView(), which
@@ -50,7 +58,7 @@ func (exe *CommandExecutor[T]) Execute(ctx context.Context) error {
 		}
 	}
 
-	if view.IsErrorView() {
+	if view.IsErrorView() || structured {
 		return cmdErr
 	}
 	black := color.New(color.FgGreen)

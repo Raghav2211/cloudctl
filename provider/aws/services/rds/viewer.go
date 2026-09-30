@@ -4,6 +4,7 @@ import (
 	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"fmt"
+	"strings"
 )
 
 var dbListTableHeader = viewer.Row{
@@ -58,6 +59,15 @@ func dbDefinitionViewer(data *dbDefinition, err error) viewer.Viewer {
 		recommendationsPanel.SetBody("recommendations unavailable: " + reason)
 	}
 	compound.AddViewer(recommendationsPanel)
+
+	h := dbHealth(data)
+	healthPanel := viewer.NewPanel().SetTitle("Health")
+	healthBody := string(h.Status)
+	if len(h.Reasons) > 0 {
+		healthBody += ": " + strings.Join(h.Reasons, "; ")
+	}
+	healthPanel.SetBody(healthBody)
+	compound.AddViewer(healthPanel)
 
 	dataPanel := viewer.NewPanel().SetTitle("Database Configuration")
 	dataPanel.AddEntry("Kind", data.kind)

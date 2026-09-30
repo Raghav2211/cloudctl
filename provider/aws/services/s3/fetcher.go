@@ -61,6 +61,7 @@ type bucketObjectsDownloadFetcher struct {
 const maxConcurrentObjectDownloads = 8
 
 func (f bucketListFetcher) Fetch(ctx context.Context) (*bucketListOutput, error) {
+	viewer.SetProgress(ctx, "Calling S3 ListBuckets...")
 	apiOutput, err := listBucket(ctx, f.client, f.requestTimeout)
 	if err != nil {
 		return nil, err
@@ -79,6 +80,7 @@ func (f bucketListFetcher) Fetch(ctx context.Context) (*bucketListOutput, error)
 }
 
 func (f bucketObjectsFetcher) Fetch(ctx context.Context) (*bucketObjectListOutput, error) {
+	viewer.SetProgress(ctx, fmt.Sprintf("Listing objects in bucket %s...", f.bucketName))
 	objects, notice, err := fetchBucketObjects(ctx, f.bucketName, f.objectPrefix, f.maxKeys, f.client)
 	if err != nil {
 		return nil, err
@@ -125,6 +127,7 @@ func (f bucketConfigurationFetcher) Fetch(ctx context.Context) (*bucketDefinitio
 	definition := &bucketDefinition{}
 	definition.SetBucketName(f.bucketName)
 
+	viewer.SetProgress(ctx, fmt.Sprintf("Fetching configuration for bucket %s (policy, versioning, tags, encryption, lifecycle)...", f.bucketName))
 	policyCh := make(chan policyResult, 1)
 	policyStatusCh := make(chan policyStatusResult, 1)
 	versionCh := make(chan versionResult, 1)
@@ -231,7 +234,7 @@ func (definition *bucketDefinition) applyAINarration(ctx context.Context, client
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)
@@ -269,6 +272,7 @@ func (definition *bucketDefinition) applyAINarration(ctx context.Context, client
 
 func (f bucketObjectsDownloadFetcher) Fetch(ctx context.Context) (*bucketOjectsDownloadSummary, error) {
 	if f.recursive {
+		viewer.SetProgress(ctx, fmt.Sprintf("Listing objects under %s/%s...", f.bucketName, f.key))
 		input := &s3.ListObjectsInput{}
 		input.Bucket = &f.bucketName
 		input.Prefix = &f.key
@@ -286,6 +290,7 @@ func (f bucketObjectsDownloadFetcher) Fetch(ctx context.Context) (*bucketOjectsD
 		// wait time is naturally bounded by the semaphore instead of an
 		// arbitrary fixed timeout. Mirrors statisticsFetcher.Fetch and
 		// bucketImpactFetcher.Fetch.
+		viewer.SetProgress(ctx, fmt.Sprintf("Downloading %d object(s) from %s...", len(apiOutput.Contents), f.bucketName))
 		g, gCtx := errgroup.WithContext(ctx)
 		sem := make(chan struct{}, maxConcurrentObjectDownloads)
 		summaries := make([]*objectDownloadSummary, len(apiOutput.Contents))
@@ -304,6 +309,7 @@ func (f bucketObjectsDownloadFetcher) Fetch(ctx context.Context) (*bucketOjectsD
 	}
 
 	// Single object download — no fan-out, unaffected by ADR-0018.
+	viewer.SetProgress(ctx, fmt.Sprintf("Downloading %s/%s...", f.bucketName, f.key))
 	objectDownloadSummaryChan := make(chan *objectDownloadSummary, 1)
 	go downloadObject(ctx, f.bucketName, f.key, f.path, f.downloader, objectDownloadSummaryChan)
 

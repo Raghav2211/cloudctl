@@ -23,6 +23,29 @@ func TestViewer_CostExplorerMode(t *testing.T) {
 	v.View() // must not panic
 }
 
+func TestViewer_CostExplorerMode_WithResourceBreakdown(t *testing.T) {
+	report := &Report{
+		Mode: ModeCostExplorer,
+		Summary: &CostSummary{
+			PeriodStart: "2026-01-01", PeriodEnd: "2026-01-31", TotalAmount: 123.45, Unit: "USD",
+			ByService:  []ServiceCost{{Service: "Amazon EC2", Amount: 100.0, Unit: "USD"}, {Service: "Amazon S3", Amount: 23.45, Unit: "USD"}},
+			ByResource: []ResourceCost{{Service: "Amazon EC2", ResourceID: "i-0abc123", Amount: 80.0, Unit: "USD"}, {Service: "Amazon EC2", ResourceID: "untagged", Amount: 20.0, Unit: "USD"}},
+		},
+	}
+	v := Viewer(report, nil)
+	json := viewer.StructuredJSON(v)
+	if !strings.Contains(json, "i-0abc123") {
+		t.Errorf("expected the resource breakdown in the rendered output, got %s", json)
+	}
+	if !strings.Contains(json, "untagged") {
+		t.Errorf("expected the untagged bucket in the rendered output, got %s", json)
+	}
+	if !strings.Contains(json, "Amazon EC2") {
+		t.Errorf("expected the service breakdown still present alongside the resource breakdown, got %s", json)
+	}
+	v.View() // must not panic
+}
+
 func TestViewer_IdleScanMode_WithFindings(t *testing.T) {
 	report := &Report{
 		Mode:           ModeIdleScan,

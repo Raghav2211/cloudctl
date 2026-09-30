@@ -6,6 +6,7 @@ import (
 )
 
 var costTableHeader = viewer.Row{"Service", "Amount", "Unit"}
+var resourceCostTableHeader = viewer.Row{"Service", "Resource", "Amount", "Unit"}
 var findingsTableHeader = viewer.Row{"Rule", "Resource", "Description", "Recommendation"}
 
 // Viewer renders a Report according to its Mode — a real cost-by-service
@@ -39,7 +40,22 @@ func costSummaryViewer(summary *CostSummary) viewer.Viewer {
 	for _, s := range summary.ByService {
 		tv.AddRow(viewer.Row{s.Service, fmt.Sprintf("%.2f", s.Amount), s.Unit})
 	}
-	return tv
+	if len(summary.ByResource) == 0 {
+		return tv
+	}
+
+	rv := viewer.NewTableViewer()
+	rv.SetStyle(viewer.DefaultTableStyle())
+	rv.SetTitle("Cost by resource")
+	rv.AddHeader(resourceCostTableHeader)
+	for _, r := range summary.ByResource {
+		rv.AddRow(viewer.Row{r.Service, r.ResourceID, fmt.Sprintf("%.2f", r.Amount), r.Unit})
+	}
+
+	compound := viewer.NewCompoundViewer()
+	compound.AddViewer(tv)
+	compound.AddViewer(rv)
+	return compound
 }
 
 func idleScanViewer(report *Report) viewer.Viewer {

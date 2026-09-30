@@ -52,14 +52,11 @@ func (f *SummaryFetcher) Fetch(ctx context.Context) (*cost.CostSummary, error) {
 		groupBy = append(groupBy, types.GroupDefinition{Type: types.GroupDefinitionTypeTag, Key: aws.String(f.resourceTagKey)})
 	}
 
-	out, err := f.client.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
+	input := &costexplorer.GetCostAndUsageInput{
 		TimePeriod:  &types.DateInterval{Start: aws.String(startStr), End: aws.String(endStr)},
 		Granularity: types.GranularityMonthly,
 		Metrics:     []string{costMetric},
 		GroupBy:     groupBy,
-	})
-	if err != nil {
-		return nil, err
 	}
 
 	// Granularity=MONTHLY can return more than one bucket if the window
@@ -70,30 +67,47 @@ func (f *SummaryFetcher) Fetch(ctx context.Context) (*cost.CostSummary, error) {
 	serviceTotals := map[string]float64{}
 	resourceTotals := map[[2]string]float64{} // [service, resourceID] -> amount
 	unit := "USD"
-	for _, period := range out.ResultsByTime {
-		for _, group := range period.Groups {
-			if len(group.Keys) == 0 {
-				continue
-			}
-			service := group.Keys[0]
-			metric, ok := group.Metrics[costMetric]
-			if !ok || metric.Amount == nil {
-				continue
-			}
-			amount, parseErr := strconv.ParseFloat(*metric.Amount, 64)
-			if parseErr != nil {
-				continue
-			}
-			serviceTotals[service] += amount
-			if metric.Unit != nil && *metric.Unit != "" {
-				unit = *metric.Unit
-			}
 
-			if f.resourceTagKey != "" && len(group.Keys) >= 2 {
-				resourceID := parseTagValue(group.Keys[1])
-				resourceTotals[[2]string{service, resourceID}] += amount
+	// Adding the TAG dimension multiplies group cardinality (services ×
+	// distinct tag values), which can easily exceed one page on a
+	// real account — loop on NextPageToken until Cost Explorer stops
+	// returning one, or every total silently reflects only the first page.
+	for {
+		out, err := f.client.GetCostAndUsage(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, period := range out.ResultsByTime {
+			for _, group := range period.Groups {
+				if len(group.Keys) == 0 {
+					continue
+				}
+				service := group.Keys[0]
+				metric, ok := group.Metrics[costMetric]
+				if !ok || metric.Amount == nil {
+					continue
+				}
+				amount, parseErr := strconv.ParseFloat(*metric.Amount, 64)
+				if parseErr != nil {
+					continue
+				}
+				serviceTotals[service] += amount
+				if metric.Unit != nil && *metric.Unit != "" {
+					unit = *metric.Unit
+				}
+
+				if f.resourceTagKey != "" && len(group.Keys) >= 2 {
+					resourceID := parseTagValue(group.Keys[1])
+					resourceTotals[[2]string{service, resourceID}] += amount
+				}
 			}
 		}
+
+		if out.NextPageToken == nil || *out.NextPageToken == "" {
+			break
+		}
+		input.NextPageToken = out.NextPageToken
 	}
 
 	byService := make([]cost.ServiceCost, 0, len(serviceTotals))
@@ -102,13 +116,26 @@ func (f *SummaryFetcher) Fetch(ctx context.Context) (*cost.CostSummary, error) {
 		byService = append(byService, cost.ServiceCost{Service: service, Amount: amount, Unit: unit})
 		total += amount
 	}
-	sort.Slice(byService, func(i, j int) bool { return byService[i].Amount > byService[j].Amount })
+	sort.Slice(byService, func(i, j int) bool {
+		if byService[i].Amount != byService[j].Amount {
+			return byService[i].Amount > byService[j].Amount
+		}
+		return byService[i].Service < byService[j].Service
+	})
 
 	byResource := make([]cost.ResourceCost, 0, len(resourceTotals))
 	for key, amount := range resourceTotals {
 		byResource = append(byResource, cost.ResourceCost{Service: key[0], ResourceID: key[1], Amount: amount, Unit: unit})
 	}
-	sort.Slice(byResource, func(i, j int) bool { return byResource[i].Amount > byResource[j].Amount })
+	sort.Slice(byResource, func(i, j int) bool {
+		if byResource[i].Amount != byResource[j].Amount {
+			return byResource[i].Amount > byResource[j].Amount
+		}
+		if byResource[i].Service != byResource[j].Service {
+			return byResource[i].Service < byResource[j].Service
+		}
+		return byResource[i].ResourceID < byResource[j].ResourceID
+	})
 
 	return &cost.CostSummary{
 		PeriodStart: startStr,

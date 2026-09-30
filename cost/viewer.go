@@ -54,8 +54,28 @@ func costSummaryViewer(summary *CostSummary) viewer.Viewer {
 
 	compound := viewer.NewCompoundViewer()
 	compound.AddViewer(tv)
+
+	if allUntagged(summary.ByResource) {
+		notice := viewer.NewPanel().SetTitle("No resource-level cost data")
+		notice.SetBody("Every resource shows up as \"untagged\" — the configured tag may not be activated as a cost-allocation tag yet (AWS Billing console -> Cost Allocation Tags), or no resources currently have a value for it.")
+		compound.AddViewer(notice)
+	}
+
 	compound.AddViewer(rv)
 	return compound
+}
+
+// allUntagged reports whether every resource fell into the "untagged"
+// bucket — a strong signal the configured tag isn't actually activated as
+// a cost-allocation tag, since Cost Explorer doesn't error in that case,
+// it just returns empty values for it (see costexplorer.parseTagValue).
+func allUntagged(resources []ResourceCost) bool {
+	for _, r := range resources {
+		if r.ResourceID != "untagged" {
+			return false
+		}
+	}
+	return true
 }
 
 func idleScanViewer(report *Report) viewer.Viewer {

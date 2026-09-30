@@ -20,7 +20,7 @@ import (
 type CostCmd struct {
 	globals.AWSCLIFlag
 	Days        int32  `default:"30" help:"How many days back to analyze, for the Cost Explorer path"`
-	ResourceTag string `help:"Cost-allocation tag key to break spend down by resource (e.g. 'Name'). The tag must already be activated as a cost-allocation tag in the AWS Billing console, or this call fails. Leave empty for service-level cost only."`
+	ResourceTag string `help:"Cost-allocation tag key to break spend down by resource (e.g. 'Name'). If the tag isn't activated as a cost-allocation tag in the AWS Billing console, Cost Explorer won't error -- every resource will show up as \"untagged\" instead. Leave empty for service-level cost only."`
 }
 
 // Run tries AWS Cost Explorer first (real spend by service) and only falls

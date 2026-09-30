@@ -12,13 +12,23 @@ import (
 )
 
 type fakeCostExplorerClient struct {
-	out *costexplorer.GetCostAndUsageOutput
-	err error
+	out   *costexplorer.GetCostAndUsageOutput   // single-page fixture
+	pages []*costexplorer.GetCostAndUsageOutput // multi-page fixture, returned in order across successive calls
+	err   error
+
+	callCount int
+	gotInputs []*costexplorer.GetCostAndUsageInput
 }
 
-func (f *fakeCostExplorerClient) GetCostAndUsage(_ context.Context, _ *costexplorer.GetCostAndUsageInput, _ ...func(*costexplorer.Options)) (*costexplorer.GetCostAndUsageOutput, error) {
+func (f *fakeCostExplorerClient) GetCostAndUsage(_ context.Context, in *costexplorer.GetCostAndUsageInput, _ ...func(*costexplorer.Options)) (*costexplorer.GetCostAndUsageOutput, error) {
+	f.gotInputs = append(f.gotInputs, in)
 	if f.err != nil {
 		return nil, f.err
+	}
+	if len(f.pages) > 0 {
+		out := f.pages[f.callCount]
+		f.callCount++
+		return out, nil
 	}
 	return f.out, nil
 }
@@ -184,6 +194,130 @@ func TestSummaryFetcher_Fetch_GroupMissingResourceKeyStillCountsServiceTotal(t *
 	}
 	if len(summary.ByService) != 1 || summary.ByService[0].Amount != 50.0 {
 		t.Fatalf("expected service total to still be counted even without a resource key, got %+v", summary.ByService)
+	}
+}
+
+func TestSummaryFetcher_Fetch_PaginatesAcrossNextPageToken(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		pages: []*costexplorer.GetCostAndUsageOutput{
+			{
+				NextPageToken: aws.String("page-2-token"),
+				ResultsByTime: []types.ResultByTime{
+					{Groups: []types.Group{
+						{Keys: []string{"Amazon EC2"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("50.00"), Unit: aws.String("USD")}}},
+					}},
+				},
+			},
+			{
+				ResultsByTime: []types.ResultByTime{
+					{Groups: []types.Group{
+						{Keys: []string{"Amazon EC2"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("25.00"), Unit: aws.String("USD")}}},
+					}},
+				},
+			},
+		},
+	}
+	f := &SummaryFetcher{client: client, days: 30}
+
+	summary, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if summary.TotalAmount != 75.0 {
+		t.Fatalf("expected total 75.0 summed across both pages, got %v", summary.TotalAmount)
+	}
+	if len(summary.ByService) != 1 || summary.ByService[0].Amount != 75.0 {
+		t.Fatalf("expected EC2 summed to 75.0 across pages, got %+v", summary.ByService)
+	}
+	if len(client.gotInputs) != 2 {
+		t.Fatalf("expected exactly 2 requests (one per page), got %d", len(client.gotInputs))
+	}
+	if client.gotInputs[1].NextPageToken == nil || *client.gotInputs[1].NextPageToken != "page-2-token" {
+		t.Fatalf("expected the second request to carry the first response's NextPageToken, got %+v", client.gotInputs[1].NextPageToken)
+	}
+}
+
+func TestSummaryFetcher_Fetch_NoResourceTagKeyRequestsServiceOnlyGroupBy(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		out: &costexplorer.GetCostAndUsageOutput{
+			ResultsByTime: []types.ResultByTime{
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("50.00"), Unit: aws.String("USD")}}},
+				}},
+			},
+		},
+	}
+	f := &SummaryFetcher{client: client, days: 30}
+
+	if _, err := f.Fetch(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(client.gotInputs) != 1 {
+		t.Fatalf("expected exactly one request, got %d", len(client.gotInputs))
+	}
+	groupBy := client.gotInputs[0].GroupBy
+	if len(groupBy) != 1 || groupBy[0].Type != types.GroupDefinitionTypeDimension || *groupBy[0].Key != "SERVICE" {
+		t.Fatalf("expected GroupBy=[{DIMENSION SERVICE}] when resourceTagKey is unset, got %+v", groupBy)
+	}
+}
+
+func TestSummaryFetcher_Fetch_ResourceTagKeyAddsTagGroupBy(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		out: &costexplorer.GetCostAndUsageOutput{
+			ResultsByTime: []types.ResultByTime{
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2", "Name$i-1"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("50.00"), Unit: aws.String("USD")}}},
+				}},
+			},
+		},
+	}
+	f := &SummaryFetcher{client: client, days: 30, resourceTagKey: "Name"}
+
+	if _, err := f.Fetch(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	groupBy := client.gotInputs[0].GroupBy
+	if len(groupBy) != 2 || groupBy[1].Type != types.GroupDefinitionTypeTag || *groupBy[1].Key != "Name" {
+		t.Fatalf("expected GroupBy to include TAG:Name when resourceTagKey is set, got %+v", groupBy)
+	}
+}
+
+// TestSummaryFetcher_Fetch_TiedAmountsSortDeterministically guards against
+// map-iteration-order flakiness: resourceTotals/serviceTotals are Go maps,
+// and sort.Slice is not stable, so without an explicit tie-break, resources
+// with equal amounts (common — many near-zero or identically-priced
+// resources) would render in a different order on every run, breaking any
+// diff/script relying on --output json and undermining Track B's
+// period-over-period comparison.
+func TestSummaryFetcher_Fetch_TiedAmountsSortDeterministically(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		out: &costexplorer.GetCostAndUsageOutput{
+			ResultsByTime: []types.ResultByTime{
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2", "Name$i-c"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("10.00"), Unit: aws.String("USD")}}},
+					{Keys: []string{"Amazon EC2", "Name$i-a"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("10.00"), Unit: aws.String("USD")}}},
+					{Keys: []string{"Amazon EC2", "Name$i-b"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("10.00"), Unit: aws.String("USD")}}},
+				}},
+			},
+		},
+	}
+
+	for i := 0; i < 10; i++ {
+		f := &SummaryFetcher{client: client, days: 30, resourceTagKey: "Name"}
+		summary, err := f.Fetch(context.Background())
+		if err != nil {
+			t.Fatalf("run %d: unexpected error: %v", i, err)
+		}
+		if len(summary.ByResource) != 3 {
+			t.Fatalf("run %d: expected 3 resources, got %+v", i, summary.ByResource)
+		}
+		got := []string{summary.ByResource[0].ResourceID, summary.ByResource[1].ResourceID, summary.ByResource[2].ResourceID}
+		want := []string{"i-a", "i-b", "i-c"}
+		for j := range want {
+			if got[j] != want[j] {
+				t.Fatalf("run %d: expected deterministic tie-broken order %v, got %v", i, want, got)
+			}
+		}
 	}
 }
 

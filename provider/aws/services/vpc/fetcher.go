@@ -6,6 +6,7 @@ import (
 	ctlaws "cloudctl/provider/aws"
 	"cloudctl/viewer"
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -38,6 +39,7 @@ func vpcIDFilter(vpcID string) []types.Filter {
 func ptrStr(s string) *string { return &s }
 
 func (f vpcListFetcher) Fetch(ctx context.Context) (*vpcListOutput, error) {
+	viewer.SetProgress(ctx, "Calling EC2 DescribeVpcs...")
 	var vpcs []*vpcSummary
 	paginator := ec2.NewDescribeVpcsPaginator(f.client, &ec2.DescribeVpcsInput{})
 	for paginator.HasMorePages() {
@@ -62,6 +64,7 @@ func (f vpcListFetcher) Fetch(ctx context.Context) (*vpcListOutput, error) {
 // additive (ADR-010) — a failed or unreachable Summarize call never fails
 // Fetch itself.
 func (f vpcDefinitionFetcher) Fetch(ctx context.Context) (*vpcDefinition, error) {
+	viewer.SetProgress(ctx, fmt.Sprintf("Calling EC2 DescribeVpcs for %s...", f.vpcID))
 	vpcOut, err := f.client.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{VpcIds: []string{f.vpcID}})
 	if err != nil {
 		return nil, ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -71,6 +74,7 @@ func (f vpcDefinitionFetcher) Fetch(ctx context.Context) (*vpcDefinition, error)
 	}
 	def := newVPCDefinition(vpcOut.Vpcs[0])
 
+	viewer.SetProgress(ctx, "Fetching subnets and route tables...")
 	subnetsOut, err := f.client.DescribeSubnets(ctx, &ec2.DescribeSubnetsInput{Filters: vpcIDFilter(f.vpcID)})
 	if err != nil {
 		return nil, ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -81,6 +85,7 @@ func (f vpcDefinitionFetcher) Fetch(ctx context.Context) (*vpcDefinition, error)
 	}
 	def.SetSubnets(classifySubnets(subnetsOut.Subnets, routeTablesOut.RouteTables))
 
+	viewer.SetProgress(ctx, "Fetching NAT gateways...")
 	natOut, err := f.client.DescribeNatGateways(ctx, &ec2.DescribeNatGatewaysInput{Filter: vpcIDFilter(f.vpcID)})
 	if err != nil {
 		return nil, ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -92,6 +97,7 @@ func (f vpcDefinitionFetcher) Fetch(ctx context.Context) (*vpcDefinition, error)
 	}
 	def.SetNatGateways(nats)
 
+	viewer.SetProgress(ctx, "Fetching internet gateways...")
 	igwOut, err := f.client.DescribeInternetGateways(ctx, &ec2.DescribeInternetGatewaysInput{
 		Filters: []types.Filter{{Name: ptrStr("attachment.vpc-id"), Values: []string{f.vpcID}}},
 	})
@@ -124,7 +130,7 @@ func (def *vpcDefinition) applyAINarration(ctx context.Context, client *ai.Clien
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

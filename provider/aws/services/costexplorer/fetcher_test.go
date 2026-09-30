@@ -83,3 +83,120 @@ func TestIsAccessDenied(t *testing.T) {
 		t.Error("expected a throttling error to not be classified as access denied")
 	}
 }
+
+func TestSummaryFetcher_Fetch_NoResourceTagKeyLeavesByResourceEmpty(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		out: &costexplorer.GetCostAndUsageOutput{
+			ResultsByTime: []types.ResultByTime{
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("50.00"), Unit: aws.String("USD")}}},
+				}},
+			},
+		},
+	}
+	f := &SummaryFetcher{client: client, days: 30} // resourceTagKey left as the zero value
+
+	summary, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(summary.ByResource) != 0 {
+		t.Fatalf("expected no per-resource breakdown when resourceTagKey is unset, got %+v", summary.ByResource)
+	}
+}
+
+func TestSummaryFetcher_Fetch_GroupsByResourceTag(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		out: &costexplorer.GetCostAndUsageOutput{
+			ResultsByTime: []types.ResultByTime{
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2", "Name$i-0abc123"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("30.00"), Unit: aws.String("USD")}}},
+					{Keys: []string{"Amazon EC2", "Name$i-0def456"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("20.00"), Unit: aws.String("USD")}}},
+				}},
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2", "Name$i-0abc123"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("10.00"), Unit: aws.String("USD")}}},
+				}},
+			},
+		},
+	}
+	f := &SummaryFetcher{client: client, days: 30, resourceTagKey: "Name"}
+
+	summary, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(summary.ByResource) != 2 {
+		t.Fatalf("expected 2 resources, got %+v", summary.ByResource)
+	}
+	if summary.ByResource[0].ResourceID != "i-0abc123" || summary.ByResource[0].Amount != 40.0 {
+		t.Errorf("expected i-0abc123 summed across periods to 40.0 first, got %+v", summary.ByResource[0])
+	}
+	if summary.ByResource[1].ResourceID != "i-0def456" || summary.ByResource[1].Amount != 20.0 {
+		t.Errorf("expected i-0def456 at 20.0 second, got %+v", summary.ByResource[1])
+	}
+	if summary.ByResource[0].Service != "Amazon EC2" {
+		t.Errorf("expected resource cost tagged with its service, got %+v", summary.ByResource[0])
+	}
+	if len(summary.ByService) != 1 || summary.ByService[0].Amount != 60.0 {
+		t.Fatalf("expected service total 60.0 unaffected by resource grouping, got %+v", summary.ByService)
+	}
+}
+
+func TestSummaryFetcher_Fetch_UntaggedResourcesBucketAsUntagged(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		out: &costexplorer.GetCostAndUsageOutput{
+			ResultsByTime: []types.ResultByTime{
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2", "Name$"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("15.00"), Unit: aws.String("USD")}}},
+				}},
+			},
+		},
+	}
+	f := &SummaryFetcher{client: client, days: 30, resourceTagKey: "Name"}
+
+	summary, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(summary.ByResource) != 1 || summary.ByResource[0].ResourceID != "untagged" {
+		t.Fatalf("expected untagged spend to bucket as \"untagged\", got %+v", summary.ByResource)
+	}
+}
+
+func TestSummaryFetcher_Fetch_GroupMissingResourceKeyStillCountsServiceTotal(t *testing.T) {
+	client := &fakeCostExplorerClient{
+		out: &costexplorer.GetCostAndUsageOutput{
+			ResultsByTime: []types.ResultByTime{
+				{Groups: []types.Group{
+					{Keys: []string{"Amazon EC2"}, Metrics: map[string]types.MetricValue{"UnblendedCost": {Amount: aws.String("50.00"), Unit: aws.String("USD")}}},
+				}},
+			},
+		},
+	}
+	f := &SummaryFetcher{client: client, days: 30, resourceTagKey: "Name"}
+
+	summary, err := f.Fetch(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(summary.ByResource) != 0 {
+		t.Fatalf("expected no resource entries when a group is missing the resource key, got %+v", summary.ByResource)
+	}
+	if len(summary.ByService) != 1 || summary.ByService[0].Amount != 50.0 {
+		t.Fatalf("expected service total to still be counted even without a resource key, got %+v", summary.ByService)
+	}
+}
+
+func TestParseTagValue(t *testing.T) {
+	cases := map[string]string{
+		"Name$i-0abc123":  "i-0abc123",
+		"Name$":           "untagged",
+		"Name":            "Name",
+		"Name$multi$part": "multi$part",
+	}
+	for input, want := range cases {
+		if got := parseTagValue(input); got != want {
+			t.Errorf("parseTagValue(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

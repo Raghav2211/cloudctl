@@ -9,6 +9,7 @@ import (
 	"errors"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,15 +25,17 @@ type getCostAndUsageAPI interface {
 	GetCostAndUsage(ctx context.Context, params *costexplorer.GetCostAndUsageInput, optFns ...func(*costexplorer.Options)) (*costexplorer.GetCostAndUsageOutput, error)
 }
 
-// SummaryFetcher fetches real AWS spend by service over the last Days days
-// — the same data AWS itself bills from.
+// SummaryFetcher fetches real AWS spend by service (and, if resourceTagKey
+// is set, by that cost-allocation tag) over the last Days days — the same
+// data AWS itself bills from.
 type SummaryFetcher struct {
-	client getCostAndUsageAPI
-	days   int32
+	client         getCostAndUsageAPI
+	days           int32
+	resourceTagKey string
 }
 
-func NewSummaryFetcher(cfg aws.Config, days int32) *SummaryFetcher {
-	return &SummaryFetcher{client: costexplorer.NewFromConfig(cfg), days: days}
+func NewSummaryFetcher(cfg aws.Config, days int32, resourceTagKey string) *SummaryFetcher {
+	return &SummaryFetcher{client: costexplorer.NewFromConfig(cfg), days: days, resourceTagKey: resourceTagKey}
 }
 
 const costMetric = "UnblendedCost"
@@ -42,11 +45,18 @@ func (f *SummaryFetcher) Fetch(ctx context.Context) (*cost.CostSummary, error) {
 	start := end.AddDate(0, 0, -int(f.days))
 	startStr, endStr := start.Format("2006-01-02"), end.Format("2006-01-02")
 
+	groupBy := []types.GroupDefinition{
+		{Type: types.GroupDefinitionTypeDimension, Key: aws.String("SERVICE")},
+	}
+	if f.resourceTagKey != "" {
+		groupBy = append(groupBy, types.GroupDefinition{Type: types.GroupDefinitionTypeTag, Key: aws.String(f.resourceTagKey)})
+	}
+
 	out, err := f.client.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
 		TimePeriod:  &types.DateInterval{Start: aws.String(startStr), End: aws.String(endStr)},
 		Granularity: types.GranularityMonthly,
 		Metrics:     []string{costMetric},
-		GroupBy:     []types.GroupDefinition{{Type: types.GroupDefinitionTypeDimension, Key: aws.String("SERVICE")}},
+		GroupBy:     groupBy,
 	})
 	if err != nil {
 		return nil, err
@@ -54,9 +64,11 @@ func (f *SummaryFetcher) Fetch(ctx context.Context) (*cost.CostSummary, error) {
 
 	// Granularity=MONTHLY can return more than one bucket if the window
 	// spans a calendar-month boundary — sum across every bucket so the
-	// summary is one number per service for the whole window, not a
-	// per-month breakdown the caller would have to add up itself.
-	totals := map[string]float64{}
+	// summary is one number per service (and, if requested, per resource)
+	// for the whole window, not a per-month breakdown the caller would
+	// have to add up itself.
+	serviceTotals := map[string]float64{}
+	resourceTotals := map[[2]string]float64{} // [service, resourceID] -> amount
 	unit := "USD"
 	for _, period := range out.ResultsByTime {
 		for _, group := range period.Groups {
@@ -72,20 +84,31 @@ func (f *SummaryFetcher) Fetch(ctx context.Context) (*cost.CostSummary, error) {
 			if parseErr != nil {
 				continue
 			}
-			totals[service] += amount
+			serviceTotals[service] += amount
 			if metric.Unit != nil && *metric.Unit != "" {
 				unit = *metric.Unit
+			}
+
+			if f.resourceTagKey != "" && len(group.Keys) >= 2 {
+				resourceID := parseTagValue(group.Keys[1])
+				resourceTotals[[2]string{service, resourceID}] += amount
 			}
 		}
 	}
 
-	byService := make([]cost.ServiceCost, 0, len(totals))
+	byService := make([]cost.ServiceCost, 0, len(serviceTotals))
 	var total float64
-	for service, amount := range totals {
+	for service, amount := range serviceTotals {
 		byService = append(byService, cost.ServiceCost{Service: service, Amount: amount, Unit: unit})
 		total += amount
 	}
 	sort.Slice(byService, func(i, j int) bool { return byService[i].Amount > byService[j].Amount })
+
+	byResource := make([]cost.ResourceCost, 0, len(resourceTotals))
+	for key, amount := range resourceTotals {
+		byResource = append(byResource, cost.ResourceCost{Service: key[0], ResourceID: key[1], Amount: amount, Unit: unit})
+	}
+	sort.Slice(byResource, func(i, j int) bool { return byResource[i].Amount > byResource[j].Amount })
 
 	return &cost.CostSummary{
 		PeriodStart: startStr,
@@ -93,7 +116,25 @@ func (f *SummaryFetcher) Fetch(ctx context.Context) (*cost.CostSummary, error) {
 		TotalAmount: total,
 		Unit:        unit,
 		ByService:   byService,
+		ByResource:  byResource,
 	}, nil
+}
+
+// parseTagValue extracts a tag's value from Cost Explorer's tag-group key
+// format ("<TagKey>$<TagValue>"), returning "untagged" when the value part
+// is empty — spend Cost Explorer could attribute to the service but not to
+// any specific tagged resource. A key with no "$" at all (not expected from
+// a real Cost Explorer response) falls back to returning it unchanged
+// rather than panicking.
+func parseTagValue(rawKey string) string {
+	value := rawKey
+	if parts := strings.SplitN(rawKey, "$", 2); len(parts) == 2 {
+		value = parts[1]
+	}
+	if value == "" {
+		return "untagged"
+	}
+	return value
 }
 
 // IsAccessDenied reports whether err is Cost Explorer rejecting the call

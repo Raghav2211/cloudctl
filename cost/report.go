@@ -7,13 +7,26 @@ type ServiceCost struct {
 	Unit    string
 }
 
+// ResourceCost is one resource's spend within a CostSummary's period,
+// attributed via a cost-allocation tag rather than AWS's own per-resource
+// billing data (AWS doesn't expose that for most services). ResourceID is
+// that tag's value; "untagged" means Cost Explorer had spend for the
+// service but no value for the configured tag on it.
+type ResourceCost struct {
+	ResourceID string
+	Service    string
+	Amount     float64
+	Unit       string
+}
+
 // CostSummary is real spend from AWS Cost Explorer, grouped by service.
 type CostSummary struct {
 	PeriodStart string
 	PeriodEnd   string
 	TotalAmount float64
 	Unit        string
-	ByService   []ServiceCost // sorted descending by Amount
+	ByService   []ServiceCost  // sorted descending by Amount
+	ByResource  []ResourceCost // sorted descending by Amount; empty unless a resource tag was requested
 }
 
 // Mode selects which of Report's two possible shapes is populated.

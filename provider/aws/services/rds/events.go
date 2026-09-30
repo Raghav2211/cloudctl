@@ -57,6 +57,7 @@ type dbEventListFetcher struct {
 }
 
 func (f dbEventListFetcher) Fetch(ctx context.Context) (*dbEventListOutput, error) {
+	viewer.SetProgress(ctx, fmt.Sprintf("Calling RDS DescribeEvents for %s...", f.identifier))
 	durationMinutes := int32(f.since.Minutes())
 	out, err := f.client.DescribeEvents(ctx, &rds.DescribeEventsInput{
 		SourceIdentifier: &f.identifier,
@@ -130,7 +131,7 @@ func (data *dbEventListOutput) applyAINarration(ctx context.Context, client *ai.
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

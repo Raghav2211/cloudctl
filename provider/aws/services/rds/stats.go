@@ -56,6 +56,7 @@ func (f dbStatisticsFetcher) Fetch(ctx context.Context) (*dbStatistics, error) {
 
 	stats := &dbStatistics{identifier: f.identifier}
 
+	viewer.SetProgress(ctx, fmt.Sprintf("Fetching CloudWatch statistics for %s...", f.identifier))
 	cpu, err := f.averageMetric(ctx, "CPUUtilization", start, end)
 	if err != nil {
 		stats.apiError = ctlaws.NewErrorInfo(ctlaws.AWSError(err), viewer.ERROR, nil)
@@ -126,7 +127,7 @@ func (stats *dbStatistics) applyAINarration(ctx context.Context, client *ai.Clie
 		summary, summaryErr             string
 		recommendations, recommendedErr string
 	}
-	result, _ := viewer.WithSpinner("Generating AI summary and recommendations...", func() (narration, error) {
+	result, _ := viewer.WithNestedProgress(ctx, "Generating AI summary and recommendations...", func() (narration, error) {
 		var n narration
 		var wg sync.WaitGroup
 		wg.Add(2)

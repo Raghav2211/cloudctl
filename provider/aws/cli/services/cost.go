@@ -19,7 +19,8 @@ import (
 
 type CostCmd struct {
 	globals.AWSCLIFlag
-	Days int32 `default:"30" help:"How many days back to analyze, for the Cost Explorer path"`
+	Days        int32  `default:"30" help:"How many days back to analyze, for the Cost Explorer path"`
+	ResourceTag string `help:"Cost-allocation tag key to break spend down by resource (e.g. 'Name'). The tag must already be activated as a cost-allocation tag in the AWS Billing console, or this call fails. Leave empty for service-level cost only."`
 }
 
 // Run tries AWS Cost Explorer first (real spend by service) and only falls
@@ -35,19 +36,20 @@ func (cmd *CostCmd) Run(ctx context.Context, cli *global.CLIFlag) error {
 	}
 
 	exec := &executor.CommandExecutor[*cost.Report]{
-		Fetcher: costFetcher{cfg: *session, days: cmd.Days},
+		Fetcher: costFetcher{cfg: *session, days: cmd.Days, resourceTag: cmd.ResourceTag},
 		Viewer:  cost.Viewer,
 	}
 	return exec.Execute(ctx)
 }
 
 type costFetcher struct {
-	cfg  awssdk.Config
-	days int32
+	cfg         awssdk.Config
+	days        int32
+	resourceTag string
 }
 
 func (f costFetcher) Fetch(ctx context.Context) (*cost.Report, error) {
-	summary, err := costexplorer.NewSummaryFetcher(f.cfg, f.days).Fetch(ctx)
+	summary, err := costexplorer.NewSummaryFetcher(f.cfg, f.days, f.resourceTag).Fetch(ctx)
 	if err == nil {
 		return &cost.Report{Mode: cost.ModeCostExplorer, Summary: summary}, nil
 	}
